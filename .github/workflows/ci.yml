@@ -1,0 +1,40 @@
+name: CyberLab checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  local-production:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.10', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install verified runtime offline
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --no-index --find-links vendor --require-hashes -r requirements.txt
+      - name: Regression and smoke checks
+        run: |
+          .venv/bin/python -m unittest discover -s tests -v
+          .venv/bin/python scripts/smoke_test.py
+      - name: Check packaged source matches repository
+        run: |
+          .venv/bin/python scripts/package_release.py --output /tmp/cyberlab-check.zip
+          .venv/bin/python - <<'PYCODE'
+          from zipfile import ZipFile
+          with ZipFile('cyberlab-ai.zip') as published, ZipFile('/tmp/cyberlab-check.zip') as built:
+              assert sorted(published.namelist()) == sorted(built.namelist())
+              for name in published.namelist():
+                  assert published.read(name) == built.read(name), name
+          PYCODE
+      - name: Verify production installer
+        run: |
+          .venv/bin/python scripts/install_production.py --prefix "$RUNNER_TEMP/cyberlab" --data-dir "$RUNNER_TEMP/cyberlab-data" --projects-dir "$RUNNER_TEMP/cyberlab-projects" --no-auto-intelligence

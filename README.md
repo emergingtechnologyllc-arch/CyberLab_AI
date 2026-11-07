@@ -1,179 +1,167 @@
 # CyberLab
 
-One local security workspace for project discovery, investigations, monitoring,
-intelligence, verification and evidence. All capabilities run in one application,
-with one release version.
+One local security workspace for project investigations, current public threat
+references, monitoring, controlled verification, and evidence.
+
+**[How to Use — plain-language, step-by-step guide](HOW_TO_USE.md)** ·
+[Printable PDF guide](docs/CyberLab-How-To-Use.pdf) · [Production operations](PRODUCTION.md) · [Validation results](TEST_RESULTS.md)
 
 ![CyberLab workspace](docs/overview.png)
 
 [Download the current program](https://github.com/emergingtechnologyllc-arch/CyberLab_AI/raw/refs/heads/main/cyberlab-ai.zip)
 
-## Run
+## Install the local production profile
 
-Requires Python 3.10+ and Bash (Ubuntu 22.04+). No pip packages, Node.js, or build
-step is needed to run CyberLab. Ollama is optional for AI features.
-
-Unzip `cyberlab-ai.zip` into a **new directory**, then:
+Python 3.10+ and Bash are required (Ubuntu 22.04+). Extract the ZIP to a fresh
+folder, open a terminal inside its `cyberlab-ai` directory, and run:
 
 ```bash
-cd cyberlab-ai
-python3 scripts/smoke_test.py
+python3 scripts/install_production.py
+```
+
+The installer creates a private persistent runtime, verifies and installs the
+bundled Waitress dependency offline, backs up an existing database, and runs
+isolated smoke checks before activating the release. It prints a stable launch
+command; normally:
+
+```bash
+"$HOME/.local/share/cyberlab/start.sh"
+```
+
+Open `http://127.0.0.1:8780`. Stop any earlier manual instance first. This is a
+single-user **local production profile**, not a public multi-user web service.
+The loopback bind and explicit authorization for active checks remain mandatory.
+
+On Ubuntu, install `python3-venv` if virtual-environment creation is unavailable.
+No sudo is needed for the CyberLab installer itself. The verified production wheel
+is bundled, so pip does not fetch dependencies from the Internet during deployment.
+Ollama is optional and is not downloaded or started by this installer.
+
+To retain a custom existing workspace:
+
+```bash
+python3 scripts/install_production.py \
+  --data-dir /your/existing/data \
+  --projects-dir /your/existing/projects
+```
+
+Subsequent installs preserve saved paths unless explicitly changed. Defaults remain
+`~/.cyberlab-v4` and `~/CyberLab-Projects`. Prior installations, evidence and code
+releases are preserved. See the guide for the earlier temporary-workspace example,
+backup paths, rollback and troubleshooting.
+
+### Optional automatic startup
+
+```bash
+python3 scripts/install_production.py --enable-service
+```
+
+This installs a systemd **user** service only when explicitly requested. It checks
+for a user manager, refuses unrelated unit files/port occupants, and provides status
+commands. Login/logout persistence depends on the host's user-manager settings.
+Unit syntax was verified in the cloud; real Ubuntu service operation is a separate
+acceptance check.
+
+## What “learning” means
+
+CyberLab maintains a timestamped, searchable local reference library:
+
+- **CISA KEV**: known exploited vulnerabilities, refreshed hourly by default.
+- **CVE Program**: recent publisher delta windows, checked every five minutes;
+  observed records are queued and processed in bounded batches.
+- **MITRE ATT&CK**: the enterprise technique catalog, refreshed daily.
+- **OSV**: explicit project dependency checks using declared npm package metadata.
+
+Sources have saved refresh preferences, cached records, source/fetch dates,
+content revisions, failure states and a bounded audit history. Good cached data
+survives failed refreshes. Public downloads use fixed official publisher URLs and
+verified TLS; the app does not fetch arbitrary advisory links or exploit code.
+
+This is **reference refresh and retrieval, not model retraining**. Bounded related
+CVE context can reach Ollama only through root-proven project advisory aliases.
+No source/model text confirms project exploitability or authorizes a test.
+
+CVE coverage is explicitly limited to observed publisher windows, not the whole
+historical CVE database. An offline gap can miss changes. ATT&CK describes attack
+methods; it is not a live incident feed for your computer. NVD ingestion is not
+implemented in this release. See THIRD_PARTY.md for publisher attribution and terms.
+
+## Layout, explained simply
+
+- **Overview** — the front cover: projects, activity and cached-library status.
+- **Projects** — the filing cabinet: authorized local application folders.
+- **Investigations** — the flashlight: route discovery, comparisons and local AI review.
+- **Monitoring** — the reminder clock: scheduled route inventory checks.
+- **Intelligence** — the reference library: refresh/search bulletins and check dependencies.
+- **Evidence** — the notebook: original observations, risk reviews and memory snapshots.
+- **Verification** — the test bench: only separately approved synthetic/local checks.
+- **How to Use** — the complete operator guide inside the application, with download.
+- **Settings** — storage, release, local model and connection information.
+
+Choose a project in the top bar and retain that context as you navigate. Samples
+are optional and clearly synthetic; production installation does not create fake
+projects, evidence or findings. Current route tools support Next.js filenames and
+package checking supports npm manifests; this is not a universal source-code scanner.
+
+## Operational controls
+
+Waitress replaces the development HTTP transport. The application has request/body
+limits, a deduplicated bounded background queue, a per-data-directory instance lock,
+private file permissions, SQLite WAL, consistent backups and graceful shutdown.
+`/healthz` checks runtime/database readiness; it does not certify model/feed health.
+
+Automatic public-source refresh is enabled by default while the installed app is
+running. Disable globally with the installer's `--no-auto-intelligence`, or pause
+individual sources in Intelligence. Project monitoring, scheduled AI analysis and
+active verification each retain their separate controls and consent.
+
+## Development and release checks
+
+From the source checkout, prepare the same verified runtime:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install --no-index --find-links vendor --require-hashes -r requirements.txt
+.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python scripts/smoke_test.py
 bash ./start.sh
 ```
 
-Open `http://127.0.0.1:8780`. Stop the old CyberLab process before using the same
-port. `start-cyberlab-v4.sh` remains a compatibility wrapper for `start.sh`.
-
-## The workspace
-
-- **Overview**: project counts, changes awaiting review and recent activity.
-- **Projects**: open a project, create a workspace, or create a synthetic sample.
-- **Investigations**: choose route discovery, change comparison, local AI review,
-  or a bounded local application investigation in one guided form.
-- **Monitoring**: compare now, configure schedules, pause/resume and review changes.
-- **Intelligence**: check declared npm dependencies against OSV advisories.
-- **Evidence**: browse history, correlate risk indicators and build evidence memory.
-- **Verification**: explicitly approve offline experiments or localhost test plans.
-- **Settings**: see storage, release and model configuration; check Ollama connectivity.
-
-Select a project in the top bar once and keep that context as you navigate.
-Tools open the first available project when no context is supplied; selecting
-“All projects” keeps a global view. Task forms require a project except for a
-local-target-only investigation.
-
-### Try it without configuring an application
-
-1. Open **Projects → Add a project**. Give it a name and select **Include a sample
-   project with synthetic routes**. Authorize creating the local folder.
-2. Open that workspace and start **Review project changes**. The first comparison
-   establishes a baseline; it does not invent a change.
-3. Run **Verification → Synthetic experiment** to create offline test evidence.
-4. See results in **Evidence**. Add/remove a sample route file and compare again
-   to see a persisted change review with source links.
-5. Enable **Monitoring** only if desired. Scheduled AI has a separate opt-in.
-
-Sample localhost plans target `127.0.0.1:3999`. To use those plans, run
-`python3 scripts/demo_local.py` in a separate terminal and authorize the localhost
-checks in Verification. The offline experiment does not need this server.
-
-## Upgrade and preserve data
-
-The former version directories are replaced by a single source tree. The prior
-v4.11 ZIP is retained in `releases/` for reference. Earlier capabilities are
-part of the current application; you do not launch them separately.
-
-The default database remains `~/.cyberlab-v4/investigations.sqlite3` and the default
-projects folder remains `~/CyberLab-Projects`. New code uses additive migrations;
-existing histories are preserved. Unknown legacy project roots are never guessed.
-No database is included in the ZIP.
-
-Before opening an existing database, stop CyberLab and make a consistent backup:
+The compatibility command `bash ./start-cyberlab-v4.sh` launches the same program.
+Public-network checks are deliberately separate from isolated offline tests:
 
 ```bash
-mkdir -p ~/CyberLab-Backups
-python3 - <<'PY'
-from pathlib import Path
-from datetime import datetime
-import os, sqlite3
-root = Path(os.getenv('CYBERLAB_DATA_DIR', str(Path.home()/'.cyberlab-v4')))
-source = root/'investigations.sqlite3'
-if source.exists():
-    destination = Path.home()/'CyberLab-Backups'/('cyberlab-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f') + '.sqlite3')
-    with sqlite3.connect(source.as_uri()+'?mode=ro',uri=True) as old, sqlite3.connect(destination) as backup:
-        old.backup(backup)
-    print('Backup:',destination)
-else:
-    print('No database at:',source)
-PY
+.venv/bin/python scripts/refresh_intelligence.py --data-dir /your/data --status
+.venv/bin/python scripts/refresh_intelligence.py --data-dir /your/data
+.venv/bin/python scripts/smoke_test.py --live-ollama
 ```
 
-If you used a custom data/projects directory in the previous release, use the
-**same environment variables** for backup and the new launcher:
-
-```bash
-CYBERLAB_DATA_DIR=/your/existing/data \
-CYBERLAB_PROJECTS_DIR=/your/existing/projects \
-bash ./start.sh
-```
-
-If v4.11 was installed in a temporary test directory, its data is under that
-parent directory's `data/` and `projects/`, not necessarily the default locations.
-Settings in the running old app show the paths. Keep the old installation until
-you have checked your evidence in the new one.
-
-To roll back: stop the new process, preserve its database separately, and use a
-pre-upgrade backup with the preserved old installation. Never copy a backup over
-a running database. Newer evidence will not appear in a pre-upgrade backup.
-
-## Configuration
-
-| Variable | Default |
-|---|---|
-| `CYBERLAB_DATA_DIR` | `~/.cyberlab-v4` |
-| `CYBERLAB_PROJECTS_DIR` | `~/CyberLab-Projects` |
-| `CYBERLAB_MODEL` | `llama3.2:latest` |
-| `CYBERLAB_V4_PORT` | `8780` |
-| `CYBERLAB_LIVE_AI` | off; existing optional local test selector |
-
-Storage/model settings take effect on restart. Existing project folders directly
-under the configured project root appear automatically; symlinks are excluded.
-Create the parent of a custom data directory before startup. Run one CyberLab
-process per database. The dashboard binds to loopback; it is not a public service.
-
-## Tests
-
-```bash
-python3 scripts/smoke_test.py               # isolated functional checks
-python3 -m unittest discover -s tests -v    # complete regression suite
-python3 scripts/smoke_test.py --live-ollama # additionally require real local AI
-```
-
-Offline tests create temporary databases and project folders. They do not modify
-your personal database. Live-model checks fail with a nonzero exit status when
-Ollama/model/schema validation is unavailable; they are not replaced by mocks.
-
-Optional development browser checks require Playwright and an installed Chromium:
+Optional development browser/PDF tools require Playwright and Chromium; they are
+not application runtime dependencies:
 
 ```bash
 python3 scripts/browser_check.py --screenshots /tmp/cyberlab-ui-review
+python3 scripts/build_guide_pdf.py --url http://127.0.0.1:8780/help
 ```
 
-The browser check launches its own isolated server and verifies the full project
-workflow and eight pages at desktop, tablet and phone widths. These browser tools
-are **not runtime dependencies** of CyberLab.
+`cyberlab/__init__.py` remains the authoritative application version. Update it and
+CHANGELOG.md for releases. Do not create parallel version-specific source folders.
+`python3 scripts/package_release.py` deterministically builds the single current
+`cyberlab-ai.zip` from a shared allowlist, including the production wheel and guides,
+while excluding credentials, databases, virtual environments and historical releases.
+Always test a fresh extraction and installer before publication.
 
-## Releases going forward
-
-`cyberlab/__init__.py` is the authoritative release version. The application frame,
-settings, server banner and request user agents read it. Update it for each release
-and describe changes in CHANGELOG.md; do not create another version-specific source
-folder or put historical module versions in the interface.
-
-```bash
-python3 -m unittest discover -s tests -v
-python3 scripts/smoke_test.py
-python3 scripts/package_release.py
-```
-
-Packaging deterministically rebuilds `cyberlab-ai.zip` with a stable `cyberlab-ai/`
-root from an explicit allowlist. It includes Python, CSS, launchers, tests and docs;
-it excludes database files, caches, credentials and historical releases. Test a
-fresh extraction before publishing. Existing data directories keep their names
-across releases so a version bump never silently creates a new database.
-
-## Scope and limits
+## Limits
 
 Route discovery reads filenames, not source contents or authorization logic.
-Model input is bounded metadata and sanitized root-scoped evidence references.
-Models return hypotheses, not confirmed vulnerabilities. Recommendations cannot
-run tests, commands, remediation or merges. Local verification requires separate
-explicit approval and bounded synthetic-account test plans.
+Models return unverified hypotheses. Verification remains bounded to authorized
+synthetic/offline or loopback cases; no arbitrary shell tools, remote exploitation,
+automatic patching, or automatic merging are implemented. A status mismatch alone
+is not a confirmed vulnerability.
 
-Ollama failures do not stop offline workflows. Monitoring runs only while CyberLab
-is open; no OS-level service is installed. Catch-all/ambiguous dynamic routes are
-not correlated. Legacy evidence without root provenance stays viewable but is
-excluded from new root-scoped model context.
-
-The larger NVD/vector-database/autonomous-remediation specification is future work,
-not a capability claim. See [TEST_RESULTS.md](TEST_RESULTS.md) for platform and
-live-model validation limits, and [ANALYSIS.md](ANALYSIS.md) for engineering context.
+Legacy unknown-root evidence remains viewable but is excluded from new root-scoped
+model context. Preserve configured data/projects paths across upgrades. User-service,
+Ubuntu and real Ollama results must be verified on the target host; do not confuse
+cloud Debian/mocked checks with those integrations. Production here describes an
+implemented local runtime/deployment profile, not a security certification or
+complete detection/coverage guarantee.

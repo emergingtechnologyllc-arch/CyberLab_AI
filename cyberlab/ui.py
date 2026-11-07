@@ -10,8 +10,9 @@ from . import __version__, projects as project_store
 NAV = (('/', 'Overview', 'overview'), ('/projects','Projects','folder'),
        ('/investigations','Investigations','search'), ('/monitoring','Monitoring','pulse'),
        ('/intelligence','Intelligence','globe'), ('/evidence','Evidence','layers'),
-       ('/verification','Verification','check'))
+       ('/verification','Verification','check'),('/help','How to Use','book'))
 ICONS = {
+ 'book':'M3 4h7l2 2 2-2h7v16h-7l-2 2-2-2H3V4ZM12 6v16',
  'shield':'M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3ZM9 12l2 2 4-4',
  'overview':'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',
  'folder':'M3 7V5h6l2 2h10v13H3V7Z',
@@ -75,7 +76,7 @@ def layout(content, title='Overview', active='/', project='', names=()):
         f'<p class="nav-label">Workspace</p><nav class="nav-group" aria-label="Main navigation">{nav}<a class="nav-link mobile-settings" href="{esc(url("/settings",project))}">{icon("settings")}Settings</a></nav>'
         f'<div class="sidebar-bottom"><a class="nav-link{" active" if active == "/settings" else ""}" href="{esc(url("/settings",project))}">{icon("settings")}Settings</a>'
         f'<div class="local-note"><i class="dot"></i> Your workspace. Your machine.<span>Projects and evidence stay local.</span></div>'
-        f'<div class="release"><span>CyberLab {__version__}</span><span>Local edition</span></div></div></aside><div class="app">'
+        f'<div class="release"><span>CyberLab {__version__}</span><span>Local production</span></div></div></aside><div class="app">'
         f'<header class="topbar"><div class="breadcrumb"><span>Workspace</span><span>/</span><strong>{esc(title)}</strong></div>'
         f'<div class="top-actions"><form class="project-switcher" method="get" action="{esc(active)}"><label for="workspace-project">Active project</label>'
         f'<select id="workspace-project" name="project">{options}</select><button type="submit">Open</button></form>'
@@ -166,7 +167,7 @@ def workspace(db_path, base, token, path, query):
     project = query.get('project',[''])[0]
     if project and project not in names:
         raise ValueError('That project is not in the configured projects folder')
-    if not project and 'project' not in query and path not in ('/', '/projects', '/settings') and names:
+    if not project and 'project' not in query and path not in ('/', '/projects', '/settings', '/help') and names:
         project = names[0]
     rows = records(db_path,project,base=base)
     with sqlite3.connect(db_path) as db:
@@ -178,7 +179,7 @@ def workspace(db_path, base, token, path, query):
     active_settings = [s for s in settings if not project or s['project_root'] == str(Path(base)/project)]
     notices = {'created':'Project created. Your workspace is ready for its first investigation.',
                'queued':'Investigation started. Refresh the history below to see its progress.',
-               'saved':'Monitoring preferences saved.', 'completed':'Action completed. Review the results below.'}
+               'saved':'Preferences saved.', 'completed':'Action completed. Review the results below.'}
     notice = notices.get(query.get('notice',[''])[0],'')
     lead = f'<div class="notice" role="status">{notice}</div>' if notice else ''
     title = dict((p,n) for p,n,_ in NAV).get(path,'Settings')
@@ -199,6 +200,11 @@ def workspace(db_path, base, token, path, query):
                    (sum(s['enabled'] for s in active_settings),'Active monitors','clock','Runs while CyberLab is open'),
                    (evidence_count,'Evidence records','layers','Observations, experiments & memory'))
         body += '<div class="stats">'+''.join(f'<div class="stat"><div class="stat-top">{label}{icon(symbol)}</div><div class="stat-value">{value:02d}</div><div class="stat-bottom">{hint}</div></div>' for value,label,symbol,hint in metrics)+'</div>'
+        from . import knowledge
+        library=knowledge.status(db_path)
+        total=sum(s['record_count'] for s in library)
+        waiting=sum(s['stale'] or s['state']=='error' for s in library)
+        body+=f'<div class="info-box">{icon("globe")} Intelligence library: <strong>{total:,} references</strong> · {waiting} sources need a fresh check. <a href="/intelligence">Review sources →</a></div>'
         project_content = ''.join(f'<div class="project-card"><div class="project-symbol">{icon("folder")}</div><div class="project-info"><h3>{esc(n)}</h3><p>Local project · Ready to investigate</p></div>{button("Open workspace","/investigations",n,symbol="arrow")}</div>' for n in names[:4])
         if not project_content:
             project_content = empty('Connect your first project','Bring a local project into focus, or try a sample to explore the workflow.',button('Add a project','/projects',primary=True,symbol='plus'))
@@ -236,8 +242,9 @@ def workspace(db_path, base, token, path, query):
         body += '<section><h2>Route comparisons</h2>'+activity_table([r for r in rows if r['title']=='Route comparison'])+'</section>'
         body += '<section><h2>Change investigations</h2>'+ ('<div class="table-wrap"><table><thead><tr><th>Review</th><th>Project</th><th>Status</th></tr></thead><tbody>'+links+'</tbody></table></div>' if links else empty('No changes awaiting review','A baseline establishes what is there. Later route changes appear here.',symbol='check'))+'</section>'
     elif path == '/intelligence':
-        body = heading('Put dependencies in context.','Check declared npm dependencies against OSV security advisories.',eyebrow=scope)
-        body += '<div class="form-layout"><section class="panel"><h2>Check project advisories</h2>'+need_project(project)+form_open('/intelligence/check',token,project,'/intelligence')
+        body = heading('Current intelligence. Clear provenance.','Refresh vulnerability and attack references, then check whether a project needs review.',eyebrow=scope)
+        body += knowledge_view(db_path,token,project,query)
+        body += '<div class="form-layout" style="margin-top:24px"><section class="panel"><h2>Check project advisories</h2>'+need_project(project)+form_open('/intelligence/check',token,project,'/intelligence')
         body += '<p class="muted fine">CyberLab reads your package manifest and queries OSV for candidate advisory matches. A match needs review before it becomes a finding.</p>'+consent('I authorize reading this project’s dependency manifest and sending package names to OSV.')+'<button class="primary">Check advisories '+icon('arrow')+'</button></form></section><aside class="panel"><h2>What leaves your machine?</h2><p class="muted fine">Dependency names and declared versions go to api.osv.dev. Source files and credentials are excluded.</p></aside></div>'
         body += '<section style="margin-top:24px"><h2>Advisory history</h2>'+activity_table([r for r in rows if r['title']=='Advisory check'])+'</section>'
     elif path == '/evidence':
@@ -260,14 +267,19 @@ def workspace(db_path, base, token, path, query):
         body += consent('I own this local test application and approve the selected checks using synthetic test accounts.')+'<div class="form-footer"><small>Model recommendations cannot approve tests.</small><button class="primary">Run approved test</button></div></form></section>'
         body += '<aside class="panel"><h2>Prepare your test</h2><p class="muted fine">Synthetic experiments require <code>cyberlab-test-fixture.json</code>. Localhost checks require <code>cyberlab-live-plan.json</code> and a running test application.</p><div class="info-box">A status mismatch is a review signal. It does not confirm an access-control vulnerability.</div></aside></div>'
         body += '<section style="margin-top:24px"><h2>Verification history</h2>'+activity_table([r for r in rows if r['title'] in ('Local verification','Synthetic experiment')])+'</section>'
+    elif path == '/help':
+        from .guide import render
+        actions=button('Download guide','/help/download')
+        if (Path(__file__).resolve().parents[1]/'docs/CyberLab-How-To-Use.pdf').is_file(): actions+=button('Printable PDF','/help/pdf')
+        body = heading('How to use CyberLab.','Plain-language explanations and step-by-step instructions.',actions)+render()
     else:
         body = heading('Your local workspace.','Connection details and application settings, together in one place.',eyebrow='Workspace / Settings')
         body += '<div class="two-columns"><section class="panel"><h2>Application</h2><dl class="settings-list">'
-        for label,value in [('Program','CyberLab'),('Release',__version__),('Storage','Local SQLite database'),('Data directory',Path(db_path).parent),('Projects directory',base)]:
+        for label,value in [('Program','CyberLab'),('Release',__version__),('Runtime','Waitress · loopback-only production profile'),('Storage','Local SQLite database'),('Data directory',Path(db_path).parent),('Projects directory',base)]:
             body += f'<div><dt>{label}</dt><dd>{esc(value)}</dd></div>'
         body += '</dl><p class="help">All capabilities use this single application and release version. Existing investigation records remain available.</p></section>'
         connection, connection_detail = model_connection() if query.get('check',[''])[0]=='1' else ('Not checked','Check whether Ollama and your configured model are available. No analysis is started.')
-        body += '<section class="panel"><h2>Local AI connection</h2><dl class="settings-list"><div><dt>Provider</dt><dd>Ollama</dd></div><div><dt>Endpoint</dt><dd>127.0.0.1:11434</dd></div><div><dt>Model</dt><dd>'+esc(os.getenv('CYBERLAB_MODEL','llama3.2:latest'))+'</dd></div></dl><p class="muted fine">AI is optional. Route discovery, comparisons, evidence history, and offline experiments work without it.</p><p class="help">Run the optional live-model smoke test to verify the full AI integration.</p></section></div>'
+        body += '<section class="panel"><h2>Local AI connection</h2><dl class="settings-list"><div><dt>Provider</dt><dd>Ollama</dd></div><div><dt>Endpoint</dt><dd>127.0.0.1:11434</dd></div><div><dt>Model</dt><dd>'+esc(os.getenv('CYBERLAB_MODEL','llama3.2:latest'))+'</dd></div></dl><p class="muted fine">AI is optional. Route discovery, comparisons, evidence history, and offline experiments work without it.</p><p class="fine"><strong>'+esc(connection)+'</strong></p><p class="help">'+esc(connection_detail)+'</p><a class="button" href="'+esc(url('/settings',project,check=1))+'">Check connection</a></section></div>'
         body += '<section style="margin-top:24px"><h2>Workspace configuration</h2><p class="muted fine">Directories and the model are configured when CyberLab starts. Restart after changing them.</p><details><summary>Advanced configuration</summary><pre>CYBERLAB_DATA_DIR — evidence database directory\nCYBERLAB_PROJECTS_DIR — approved projects folder\nCYBERLAB_MODEL — local Ollama model\nCYBERLAB_V4_PORT — loopback dashboard port</pre></details></section>'
     return layout(lead+body,title,path,project,names)
 
@@ -302,4 +314,62 @@ def change_detail(record, token, evidence_url):
     else:
         body += button('Review verification options','/verification',project)
     body += '<p class="help">This action never executes live verification or remediation.</p></aside></div>'
+    return body
+
+
+def knowledge_view(db_path,token,project,query):
+    from . import knowledge
+    from urllib.parse import quote
+    sources=sorted(knowledge.status(db_path),key=lambda row:list(knowledge.SOURCES).index(row['source']))
+    body='<section class="panel"><p class="eyebrow">Public reference library</p><h2>Keep your security knowledge current.</h2><p class="muted fine">Think of this as a library that receives new safety bulletins. Refreshing it updates saved reference records; it does not retrain Ollama or prove your project is vulnerable.</p>'
+    if os.getenv('CYBERLAB_AUTO_INTELLIGENCE','1')!='1':
+        body+='<div class="info-box">Automatic public updates are globally disabled for this process. Manual refresh still works. Enable automatic updates with the production installer’s --auto-intelligence option.</div>'
+    body+='<div class="source-grid">'
+    for row in sources:
+        body+='<div class="source-card"><h3>'+esc(row['name'])+'</h3>'
+        state='Stale / never refreshed' if row['stale'] else 'Fresh cache'
+        body+=f'<p>{badge(row["state"])} <span class="badge {"amber" if row["stale"] else "green"}">{state}</span></p><p class="fine">{row["record_count"]:,} saved records</p>'
+        body+=f'<p class="help">Last successful refresh (UTC): {esc(row["succeeded"] or "Never")}<br>Publisher update (UTC): {esc(row["source_updated"] or "Unknown")}</p>'
+        if row['error_code']: body+='<p class="help">Last attempt: '+esc(row['error_code'])+'. Previous good records are retained.</p>'
+        if row['coverage']: body+='<p class="help">'+esc(row['coverage'])+'</p>'
+        body+=form_open('/knowledge/refresh',token,project)+f'<input type="hidden" name="source" value="{row["source"]}">'+consent('I approve downloading this public reference feed.')+'<button>Refresh this source</button></form>'
+        body+='<details><summary>Automatic refresh preferences</summary>'+form_open('/knowledge/configure',token,project)+f'<input type="hidden" name="source" value="{row["source"]}">'
+        body+=f'<label class="check"><input type="checkbox" name="enabled" value="yes" {"checked" if row["enabled"] else ""}><span>Automatically refresh this source</span></label><label class="form-label" for="feed-{row["source"]}">Refresh interval (seconds)</label><input class="field" id="feed-{row["source"]}" name="interval" type="number" min="300" max="604800" value="{row["interval_seconds"]}" required>'+consent('I approve these public-source refresh preferences.')+'<button>Save source preferences</button></form></details></div>'
+    body+='</div></section>'
+    q=query.get('q',[''])[0]; kind=query.get('kind',[''])[0]
+    page_number=int(query.get('page',['0'])[0])
+    if not 0<=page_number<=1000: raise ValueError('Invalid knowledge page')
+    results=knowledge.search(db_path,q,kind,limit=16,offset=page_number*15)
+    found=results[:15]
+    body+='<section style="margin-top:24px"><div class="panel-head"><h2>Search the library</h2><a class="text-link" href="/help">What does this mean? →</a></div><form class="knowledge-search" method="get" action="/intelligence">'
+    body+=f'<input type="hidden" name="project" value="{esc(project)}"><label class="form-label" for="knowledge-query">CVE ID, product, or attack technique</label><input class="field" id="knowledge-query" name="q" maxlength="200" value="{esc(q)}" placeholder="CVE-…, ransomware, credential access…"><label class="form-label" for="knowledge-kind">Reference type</label><select class="field" id="knowledge-kind" name="kind">'
+    for value,label in [('','All references'),('exploited_vulnerability','Known exploited vulnerabilities'),('vulnerability','Recent vulnerability disclosures'),('attack_technique','Attack techniques')]:
+        body+=f'<option value="{value}" {"selected" if value==kind else ""}>{label}</option>'
+    body+='</select><p><button class="primary">Search references</button></p></form><p class="help">Global public references, not project findings. Up to 15 results per page are shown. Check source freshness above.</p>'
+    if found:
+        body+='<div class="table-wrap"><table><thead><tr><th>ID / source</th><th>Reference</th><th>Published / modified</th></tr></thead><tbody>'
+        for row in found:
+            href='/knowledge/'+row['source']+'/'+quote(row['external_id'],safe='')
+            body+=f'<tr><td><code>{esc(row["external_id"])}</code><span class="record-sub">{esc(row["source"].upper())}</span></td><td><a href="{href}">{esc(row["title"])}</a></td><td class="fine">{esc(row["modified"][:10])}</td></tr>'
+        body+='</tbody></table></div><div class="button-row" style="margin-top:18px">'
+        if page_number:
+            body+=f'<a class="button" href="{esc(url("/intelligence",project,q=q,kind=kind,page=page_number-1))}">← Previous results</a>'
+        if len(results)>15:
+            body+=f'<a class="button" href="{esc(url("/intelligence",project,q=q,kind=kind,page=page_number+1))}">Next results →</a>'
+        body+='</div>'
+    else: body+=empty('No matching references yet','Refresh a source above, wait for it to finish, then reload or try a different search.',symbol='globe')
+    return body+'</section>'
+
+
+def knowledge_detail(record):
+    metadata=json.loads(record['metadata'])
+    body=heading(record['external_id'],record['title'],button('Back to intelligence','/intelligence'),record['source'].upper())
+    if record.get('archived_snapshot'): body+='<div class="info-box">Saved historical reference. The current publisher record may have changed or been withdrawn; verify current guidance before acting.</div>'
+    body+='<div class="detail-grid"><section class="panel"><h2>What the publisher reports</h2><p>'+esc(record['summary']).replace('\n','<br>')+'</p>'
+    if metadata.get('required_action'): body+='<h3>Publisher’s recommended action</h3><p>'+esc(metadata['required_action'])+'</p>'
+    body+=f'<p><a class="text-link" href="{esc(record["reference"])}" rel="noopener noreferrer" target="_blank">Open official source ↗</a></p></section><aside class="panel"><h2>Read this correctly</h2>'
+    if record['source']=='kev': meaning='Attackers have used this vulnerability somewhere. Check the affected product, installed version, and vendor guidance before deciding whether your project is affected.'
+    elif record['source']=='attack': meaning='This describes a method attackers may use. Its presence in this library does not mean an attack occurred on your machine.'
+    else: meaning='A vulnerability has been publicly disclosed. A disclosure alone does not establish that your project contains or exposes it.'
+    body+='<p class="fine">'+meaning+'</p>'+f'<dl class="settings-list"><div><dt>Source modified (UTC)</dt><dd>{esc(record["modified"])}</dd></div><div><dt>Saved locally (UTC)</dt><dd>{esc(record["fetched"])}</dd></div></dl><p class="help">'+esc(metadata.get('applicability','Project applicability is not established.'))+'</p><p class="help">Saved reference revision (SHA-256):</p><code>'+esc(record.get('revision',''))+'</code></aside></div>'
     return body

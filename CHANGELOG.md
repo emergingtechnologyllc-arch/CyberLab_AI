@@ -1,3 +1,30 @@
+# 4.13.0 — Local production profile and current reference intelligence
+
+* Replaced the development HTTP transport with pinned, verified Waitress WSGI.
+* Added request limits, bounded/deduplicated background jobs, an instance lock,
+  private database permissions, WAL, release-transition backups and /healthz.
+* Added an offline-capable production installer, stable launcher/configuration,
+  tested staging before activation, retained previous releases, checksum checks,
+  unmanaged-file protection and an opt-in systemd user service.
+* Added persistent CISA KEV, CVE Program delta and MITRE enterprise ATT&CK reference
+  ingestion from fixed official publisher repositories, with conditional requests,
+  atomic cache replacement, generation/lease guards, freshness and audit states.
+* Added a persistent CVE backlog so observed records beyond one batch carry forward,
+  including when a later index returns not-modified. Coverage gaps remain explicit.
+* Connected bounded related CVE references to AI context through root-proven OSV
+  advisory aliases. This is retrieval, not model training or vulnerability proof.
+* Added Intelligence search, paginated results, readable reference details and
+  separate public-refresh preferences. Retained independent consent for active tests.
+* Archived immutable public-reference revisions so historical citations survive
+  publisher changes or removals. Interrupted jobs retain partial evidence and are
+  marked for review after restart instead of silently replaying.
+* Added How to Use navigation, a 21-topic ELI5/operator guide, in-app rendering,
+  Markdown download and print/PDF support, plus production and attribution docs.
+* Added Ubuntu/Python 3.10 and 3.12 CI checks, offline installation and package/source
+  consistency verification. CI execution results are separate from local validation.
+* Preserved the existing workflows and backend regression tests. Added feed,
+  deployment, HTTP, backup, queue, provenance, checksum and refusal-path tests.
+
 # CyberLab release history
 
 ## 4.12.0 — Unified workspace

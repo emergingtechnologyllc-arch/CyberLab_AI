@@ -1,12 +1,16 @@
-"""Loopback-only dashboard. No third-party dependencies."""
+"""Loopback-only WSGI application, served by the production Waitress transport."""
 import html
 import json
 import os
 from pathlib import Path
 import secrets
 import sqlite3
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Thread
+import io
+import logging
+from email.message import Message
+from http import HTTPStatus
+from types import SimpleNamespace
+from . import knowledge, jobs, runtime
 from urllib.parse import parse_qs, urlsplit, urlencode
 from . import change_investigation as changes, monitor, ui, projects as project_store, __version__
 from .continuous import initialize as init_continuous, assess as continuous_assess, recent as continuous_recent, detail as continuous_detail
@@ -20,21 +24,22 @@ from .intelligence import initialize as init_intel, check_project, recent_checks
 from .behavior import init_behavior, check_project as behavior_check, recent_checks as behavior_recent, detail as behavior_detail, inventory as behavior_inventory
 
 ROOT = Path(os.getenv('CYBERLAB_DATA_DIR', str(Path.home() / '.cyberlab-v4')))
-ROOT.mkdir(mode=0o700, exist_ok=True)
+ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
 DB = str(ROOT / 'investigations.sqlite3')
 PROJECTS = Path(os.getenv('CYBERLAB_PROJECTS_DIR', str(Path.home() / 'CyberLab-Projects'))).resolve()
 PROJECTS.mkdir(mode=0o700, parents=True, exist_ok=True)
 TOKEN = secrets.token_urlsafe(32)
-init_db(DB)
-init_intel(DB)
-init_behavior(DB)
-init_ai_behavior(DB)
-init_experiments(DB)
-init_live(DB)
-init_memory(DB)
-init_risk(DB)
-init_continuous(DB)
-monitor.initialize(DB)
+JOBS = jobs.Queue()
+LIBRARY = None
+
+
+def initialize():
+    runtime.migration_backup(DB,__version__)
+    for fn in (init_db,init_intel,init_behavior,init_ai_behavior,init_experiments,init_live,
+               init_memory,init_risk,init_continuous,monitor.initialize,knowledge.initialize):
+        fn(DB)
+    runtime.prepare_database(DB,__version__)
+
 
 
 def esc(x):
@@ -42,7 +47,9 @@ def esc(x):
 
 
 def evidence_url(evidence):
-    source, number = evidence['id'].split(':')
+    parts = evidence['id'].split(':')
+    if parts[0]=='knowledge' and len(parts) in (3,4): return '/knowledge/'+parts[1]+'/'+parts[2]+('?revision='+parts[3] if len(parts)==4 else '')
+    source, number = parts
     if source == 'assessment':
         return '/continuous/' + number
     prefix = {'ai_event': '/ai-behavior/', 'live_event': '/live/'}[source]
@@ -58,7 +65,23 @@ def status_label(status):
 
 
 
-class Handler(BaseHTTPRequestHandler):
+class Handler:
+    """One request, independent response buffer. Network parsing belongs to Waitress."""
+    def __init__(self,environ):
+        self.path=environ.get('PATH_INFO','/')+('?' + environ['QUERY_STRING'] if environ.get('QUERY_STRING') else '')
+        self.headers=Message()
+        for key,value in environ.items():
+            if key.startswith('HTTP_'): self.headers[key[5:].replace('_','-')]=value
+        self.headers['Content-Length']=environ.get('CONTENT_LENGTH','0') or '0'
+        self.headers['Content-Type']=environ.get('CONTENT_TYPE','')
+        self.rfile=environ['wsgi.input']; self.wfile=io.BytesIO()
+        self.server=SimpleNamespace(server_port=int(os.getenv('CYBERLAB_V4_PORT','8780')))
+        self.status=200; self.response_headers=[]
+
+    def send_response(self,status): self.status=status
+    def send_header(self,name,value): self.response_headers.append((name,str(value)))
+    def end_headers(self): pass
+
     def render_page(self, content, selected=None):
         p = urlsplit(self.path).path
         query = parse_qs(urlsplit(self.path).query)
@@ -67,12 +90,12 @@ class Handler(BaseHTTPRequestHandler):
         active = {'continuous':'/monitoring','changes':'/monitoring','risk':'/evidence',
                   'memory':'/evidence','live':'/verification','experiments':'/verification',
                   'ai-behavior':'/investigations','behavior':'/investigations','runs':'/investigations',
-                  'intelligence':'/intelligence'}.get(prefix,'/')
+                  'intelligence':'/intelligence','knowledge':'/intelligence','help':'/help'}.get(prefix,'/')
         title = dict((path,label) for path,label,_ in ui.NAV).get(active,'Overview')
         return ui.layout(content,title,active,project,project_store.discover(PROJECTS))
 
     def redirect(self, destination, project='', notice=''):
-        if destination not in ('/', '/projects','/investigations','/monitoring','/intelligence','/evidence','/verification'):
+        if destination not in ('/', '/projects','/investigations','/monitoring','/intelligence','/evidence','/verification','/intelligence'):
             destination = '/'
         location = ui.url(destination,project,**({'notice':notice} if notice else {}))
         self.send_response(303); self.send_header('Location',location); self.end_headers()
@@ -97,6 +120,38 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.valid_host(): return
         p = urlsplit(self.path).path
+        if p == '/healthz':
+            try:
+                with sqlite3.connect(DB,timeout=2) as db: db.execute('SELECT 1 FROM knowledge_sources LIMIT 1').fetchall()
+                result={'status':'ok','version':__version__,'transport':'waitress','database':'ok',
+                    'intelligence_worker': 'running' if LIBRARY and LIBRARY.thread and LIBRARY.thread.is_alive() else 'paused' if os.getenv('CYBERLAB_AUTO_INTELLIGENCE','1')!='1' else 'unavailable'}
+                status=200
+            except sqlite3.Error:
+                result={'status':'unavailable','version':__version__}; status=503
+            payload=json.dumps(result).encode()
+            self.send_response(status); self.send_header('Content-Type','application/json')
+            self.send_header('Content-Length',len(payload)); self.send_header('Cache-Control','no-store')
+            self.end_headers(); self.wfile.write(payload); return
+        if p == '/help/pdf':
+            document=Path(__file__).resolve().parents[1]/'docs/CyberLab-How-To-Use.pdf'
+            if not document.is_file(): self.send_html(self.render_page('<section>Printable guide is not included in this development build.</section>'),404); return
+            body=document.read_bytes()
+            self.send_response(200); self.send_header('Content-Type','application/pdf')
+            self.send_header('Content-Disposition','attachment; filename="CyberLab-How-To-Use.pdf"')
+            self.send_header('Content-Length',len(body)); self.end_headers(); self.wfile.write(body); return
+        if p == '/help/download':
+            from .guide import DOCUMENT
+            body=DOCUMENT.read_bytes()
+            self.send_response(200); self.send_header('Content-Type','text/markdown; charset=utf-8')
+            self.send_header('Content-Disposition','attachment; filename="CyberLab-How-To-Use.md"')
+            self.send_header('Content-Length',len(body)); self.end_headers(); self.wfile.write(body); return
+        if p.startswith('/knowledge/'):
+            parts=p.split('/')
+            revision=parse_qs(urlsplit(self.path).query,max_num_fields=10).get('revision',[''])[0]
+            record=knowledge.detail(DB,parts[2],parts[3],revision) if len(parts)==4 else None
+            if record is None: self.send_html(self.render_page('<section>Reference not found</section>'),404)
+            else: self.send_html(self.render_page(ui.knowledge_detail(record)))
+            return
         if p == '/assets/app.css':
             body = Path(__file__).with_name('assets').joinpath('app.css').read_bytes()
             self.send_response(200)
@@ -104,7 +159,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Content-Length',str(len(body)))
             self.send_header('X-Content-Type-Options','nosniff')
             self.end_headers(); self.wfile.write(body); return
-        if p in ('/', '/projects', '/investigations', '/monitoring', '/intelligence', '/evidence', '/verification', '/settings'):
+        if p in ('/', '/projects', '/investigations', '/monitoring', '/intelligence', '/evidence', '/verification', '/settings', '/help'):
             try:
                 query = parse_qs(urlsplit(self.path).query, keep_blank_values=True, max_num_fields=10)
                 self.send_html(ui.workspace(DB,PROJECTS,TOKEN,p,query))
@@ -186,7 +241,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_html(self.render_page('<p>Not found</p>'),404)
                 return
             check, matches = result
-            rows = ''.join('<div class="event"><strong>'+esc(m['package'])+' '+esc(m['declared'])+'</strong> · '+esc(m['advisory_id'])+'<p>'+esc(m['assessment'])+' — '+esc(m['reason'])+'</p><p>'+esc(m['summary'] or 'Advisory details unavailable')+'</p><p>'+esc(m['reference'] or 'https://osv.dev')+'</p></div>' for m in matches)
+            rows = ''.join('<div class="event"><strong>'+esc(m['package'])+' '+esc(m['declared'])+'</strong> · '+esc(m['advisory_id'])+'<p>'+esc(m['assessment'])+(' · CISA KEV reference linked' if m.get('known_exploited_reference') else '')+' — '+esc(m['reason'])+'</p><p>'+esc(m['summary'] or 'Advisory details unavailable')+'</p><p>'+esc(m['reference'] or 'https://osv.dev')+'</p></div>' for m in matches)
             self.send_html(self.render_page(f'<p><a href="/">← Dashboard</a> · <a href="{esc(p)}">Refresh</a></p><section><h2>Advisory check #{check["id"]}: {esc(check["status"])}</h2><p>Project: {esc(check["project"])} · Dependencies: {check["package_count"]} · Candidate matches: {check["match_count"]}</p><p>{esc(check["error"])}</p><p class="muted">Advisories are untrusted external information; a candidate match is not proof of exploitability.</p></section><section><h2>Candidate advisories</h2>{rows or "No matches yet; refresh if the check is running."}</section>'))
         elif p.startswith('/runs/') and p[6:].isdigit():
             result = get_run(DB, int(p[6:]))
@@ -201,7 +256,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if not self.valid_host(): return
-        if self.path not in ('/run', '/intelligence/check', '/behavior/check', '/ai-behavior/check', '/experiments/check', '/live/check', '/memory/build', '/risk/analyze', '/continuous/assess', '/monitor/configure', '/changes/analyze', '/projects/create', '/investigations/start', '/verification/start'):
+        if self.path not in ('/run', '/intelligence/check', '/behavior/check', '/ai-behavior/check', '/experiments/check', '/live/check', '/memory/build', '/risk/analyze', '/continuous/assess', '/monitor/configure', '/changes/analyze', '/projects/create', '/investigations/start', '/verification/start', '/knowledge/refresh', '/knowledge/configure'):
             self.send_html(self.render_page('<p>Not found</p>'),404)
             return
         try:
@@ -215,6 +270,14 @@ class Handler(BaseHTTPRequestHandler):
             if not secrets.compare_digest(field('csrf'), TOKEN) or field('authorized') != 'yes':
                 raise ValueError('Authorization confirmation or CSRF token missing')
             action = self.path
+            if action in ('/knowledge/refresh','/knowledge/configure'):
+                source=field('source')
+                if source not in knowledge.SOURCES: raise ValueError('Choose an intelligence source')
+                if action == '/knowledge/configure':
+                    knowledge.configure(DB,source,field('enabled')=='yes',int(field('interval')))
+                else:
+                    JOBS.submit(('knowledge',source),knowledge.refresh,DB,source,True)
+                self.redirect('/intelligence',notice='saved' if action=='/knowledge/configure' else 'queued'); return
             if action == '/projects/create':
                 created = project_store.create(PROJECTS,field('project_name'),sample=field('sample')=='yes')
                 self.redirect('/projects',created.name,'created'); return
@@ -272,28 +335,28 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if action == '/live/check':
                 validate_plan(project,PROJECTS)
-                Thread(target=live_run,args=(DB,project,PROJECTS),daemon=True).start()
+                JOBS.submit((action,project),live_run,DB,project,PROJECTS)
                 self.redirect(destination,selected_project,'queued' if action in ('/live/check','/experiments/check','/ai-behavior/check','/behavior/check','/intelligence/check') else 'completed')
                 return
             if action == '/experiments/check':
                 validate_fixture(project, PROJECTS)
-                Thread(target=experiment_run,args=(DB,project,PROJECTS),daemon=True).start()
+                JOBS.submit((action,project),experiment_run,DB,project,PROJECTS)
                 self.redirect(destination,selected_project,'queued' if action in ('/live/check','/experiments/check','/ai-behavior/check','/behavior/check','/intelligence/check') else 'completed')
                 return
             if action == '/ai-behavior/check':
                 behavior_inventory(project, PROJECTS)
-                Thread(target=ai_behavior_run,args=(DB,project,PROJECTS),daemon=True).start()
+                JOBS.submit((action,project),ai_behavior_run,DB,project,PROJECTS)
                 self.redirect(destination,selected_project,'queued' if action in ('/live/check','/experiments/check','/ai-behavior/check','/behavior/check','/intelligence/check') else 'completed')
                 return
             if action == '/behavior/check':
                 behavior_inventory(project, PROJECTS)
-                Thread(target=behavior_check, args=(DB,project,PROJECTS),daemon=True).start()
+                JOBS.submit((action,project),behavior_check,DB,project,PROJECTS)
                 self.redirect(destination,selected_project,'queued' if action in ('/live/check','/experiments/check','/ai-behavior/check','/behavior/check','/intelligence/check') else 'completed')
                 return
             if action == '/intelligence/check':
                 from .intelligence import project_manifest
                 project_manifest(project, PROJECTS)
-                Thread(target=check_project, args=(DB,project,PROJECTS),daemon=True).start()
+                JOBS.submit((action,project),check_project,DB,project,PROJECTS)
                 self.redirect(destination,selected_project,'queued' if action in ('/live/check','/experiments/check','/ai-behavior/check','/behavior/check','/intelligence/check') else 'completed')
                 return
             # Validate before background thread starts, then redirect to index.
@@ -301,31 +364,66 @@ class Handler(BaseHTTPRequestHandler):
             if target: safe_local_url(target)
             if project: inspect_project(project, PROJECTS)
             if not target and not project: raise ValueError('Provide a target or project')
-            Thread(target=investigate,args=(DB,target,project,PROJECTS),daemon=True).start()
+            JOBS.submit((action,project,target),investigate,DB,target,project,PROJECTS)
             self.redirect(destination,selected_project,'queued')
+        except jobs.BusyError as exc:
+            self.send_html(self.render_page('<section><h2>Action already running</h2><p>'+esc(exc)+'</p></section>'),429)
         except (ValueError, OSError, UnicodeError, json.JSONDecodeError) as exc:
             self.send_html(self.render_page('<section class="reading-width"><p class="eyebrow">Action not started</p><h2>Check your request</h2><p>'+esc(exc)+'</p><a href="/investigations">Return to investigations →</a></section>'),400)
 
 
-def main():
-    host, port = '127.0.0.1', int(os.getenv('CYBERLAB_V4_PORT','8780'))
-    print(f'CyberLab {__version__}: http://{host}:{port} | model={os.getenv("CYBERLAB_MODEL","llama3.2:latest")}')
-    print('Local-only. Press Ctrl+C to stop.')
-    changes.recover(DB)
-    worker = monitor.Monitor(DB, PROJECTS)
-    server = ThreadingHTTPServer((host,port),Handler)
-    import signal
-    def terminate(signum, frame):
-        raise KeyboardInterrupt
-    signal.signal(signal.SIGTERM, terminate)
-    worker.start()
+def application(environ,start_response):
+    """WSGI entry point. Exact host, method and body limits precede dispatch."""
+    handler=Handler(environ)
+    method=environ.get('REQUEST_METHOD','GET')
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        worker.stop()
-        server.server_close()
+        if method not in ('GET','POST','HEAD'):
+            handler.send_response(405); handler.send_header('Allow','GET, HEAD, POST')
+            handler.wfile.write(b'Method not allowed')
+        elif method=='POST' and (not handler.headers.get('Content-Length','').isdigit() or int(handler.headers['Content-Length'])>4096):
+            handler.send_response(413); handler.wfile.write(b'Request body exceeds application limit')
+        elif method=='POST': handler.do_POST()
+        else: handler.do_GET()
+    except (ValueError,UnicodeError):
+        handler.status=400; handler.response_headers=[]; handler.wfile=io.BytesIO(b'Invalid request')
+    except Exception as exc:
+        logging.getLogger('cyberlab').error('Request failed: %s',type(exc).__name__)
+        handler.status=500; handler.response_headers=[]; handler.wfile=io.BytesIO(b'Internal error; check the local service log.')
+    body=handler.wfile.getvalue()
+    headers=handler.response_headers
+    if not any(k.lower()=='content-length' for k,v in headers): headers.append(('Content-Length',str(len(body))))
+    if not any(k.lower()=='content-type' for k,v in headers): headers.append(('Content-Type','text/plain; charset=utf-8'))
+    headers.extend([('X-Frame-Options','DENY'),('Referrer-Policy','no-referrer'),('X-Content-Type-Options','nosniff')])
+    start_response(f'{handler.status} {HTTPStatus(handler.status).phrase}',headers)
+    return [b'' if method=='HEAD' else body]
 
-if __name__ == '__main__':
-    main()
+
+def main():
+    global LIBRARY
+    try:
+        from waitress import create_server
+    except ImportError:
+        raise SystemExit('Production runtime missing. Run: python3 scripts/install_production.py')
+    host,port='127.0.0.1',int(os.getenv('CYBERLAB_V4_PORT','8780'))
+    if not 1024<=port<=65535: raise SystemExit('Choose a loopback port between 1024 and 65535')
+    import signal
+    def terminate(signum,frame): raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM,terminate)
+    os.umask(0o077)
+    with runtime.instance_lock(ROOT):
+        initialize(); changes.recover(DB); runtime.recover_interrupted_jobs(DB)
+        worker=monitor.Monitor(DB,PROJECTS); library=knowledge.Refresher(DB); LIBRARY=library
+        server=create_server(application,host=host,port=port,threads=4,connection_limit=50,
+            channel_timeout=30,max_request_header_size=16384,max_request_body_size=8192,
+            ident='CyberLab',asyncore_loop_timeout=1)
+        print(f'CyberLab {__version__}: http://{host}:{port} | model={os.getenv("CYBERLAB_MODEL","llama3.2:latest")}',flush=True)
+        print('Local production runtime: Waitress. Press Ctrl+C to stop.',flush=True)
+        worker.start()
+        if os.getenv('CYBERLAB_AUTO_INTELLIGENCE','1')=='1': library.start()
+        try: server.run()
+        except KeyboardInterrupt: pass
+        finally:
+            server.close(); library.stop(); worker.stop(); JOBS.close(); server.task_dispatcher.shutdown(timeout=35)
+
+
+if __name__=='__main__': main()

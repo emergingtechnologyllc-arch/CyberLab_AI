@@ -7,17 +7,13 @@ from pathlib import Path
 from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
 
 ROOT = Path(__file__).resolve().parents[1]
-DOCS = ('README.md','CHANGELOG.md','ANALYSIS.md','TEST_RESULTS.md','start.sh','start-cyberlab-v4.sh')
 sys.path.insert(0,str(ROOT))
 from cyberlab import __version__
+from cyberlab.distribution import source_files
 
 
 def build(destination):
-    files = [ROOT/name for name in DOCS]
-    for folder in ('cyberlab','scripts','tests'):
-        files.extend(p for p in (ROOT/folder).rglob('*.py') if '__pycache__' not in p.parts)
-    files.extend((ROOT/'cyberlab/assets').glob('*.css'))
-    if (ROOT/'docs/overview.png').is_file(): files.append(ROOT/'docs/overview.png')
+    files = source_files(ROOT)
     with ZipFile(destination,'w',compression=ZIP_DEFLATED,compresslevel=9) as archive:
         for path in sorted(files):
             if path.is_symlink() or not path.resolve().is_relative_to(ROOT):

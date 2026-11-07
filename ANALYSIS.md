@@ -1,3 +1,34 @@
+# Local production transition
+
+The previous unified interface ran on Python's development HTTP server and did
+not provide a persisted, freshness-aware global threat reference library. This
+release keeps its existing local authorization boundaries but replaces the HTTP
+transport with Waitress and adds explicit resource limits and lifecycle controls.
+
+Production installation stages and tests a private release before changing the
+stable current pointer. Data lives outside code. Both installer and runtime make
+consistent, exclusive SQLite backups instead of overwriting an existing notebook.
+The managed installation marker prevents accidental replacement of unrelated files.
+The optional user unit is generated with correct per-setting path quoting and was
+checked by systemd-analyze; this does not establish actual Ubuntu service startup.
+
+Public-source ingestion is separate from project jobs and model inference. CISA
+and ATT&CK snapshots are parsed completely inside fixed response budgets and
+committed atomically. CVE deltas feed a durable bounded backlog; completed records
+and pending work have distinct states. Source failures retain previous good data.
+Both the public library and its UI expose provenance, freshness and coverage limits.
+
+The library is not a fine-tuning pipeline. Related records are retrieved only after
+an explicit root-proven package advisory check provides matching CVE aliases.
+Model-selected evidence IDs still must exist in the bounded supplied context;
+reference records never become proof of an application vulnerability by association.
+
+The current architecture is a single-user local production profile. Remote user
+accounts, broad dynamic scanning, universal language support, complete historical
+CVE mirroring and autonomous remediation are not implied by this transition.
+
+Earlier implementation notes follow for history.
+
 # Unified workspace design and implementation
 
 The old dashboard exposed the release history as separate version-labeled forms.

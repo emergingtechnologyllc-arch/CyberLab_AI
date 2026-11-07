@@ -10,6 +10,7 @@ from .provenance import migrate
 import urllib.request
 from .behavior import inventory
 from .provenance import summaries
+from .knowledge import project_context
 
 MAX_ROUTES_CONTEXT = 40
 MAX_STEPS = 5
@@ -55,7 +56,7 @@ def propose(routes, reviewed, model=None, transport=None, prior_evidence=None):
     if transport is None:
         request = urllib.request.Request('http://127.0.0.1:11434/api/chat',
             data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'})
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with urllib.request.urlopen(request, timeout=30) as response:
             raw = response.read(MAX_RESPONSE + 1)
         if len(raw) > MAX_RESPONSE:
             raise ValueError('Ollama response exceeded size budget')
@@ -81,7 +82,7 @@ def run(db_path, project, base, planner=propose):
     record(db_path,run_id,'inventory',{'route_count':len(routes),'scope':'filename-only; no source read'})
     try:
         for step in range(MAX_STEPS):
-            proposal = (propose(routes,reviewed,prior_evidence=summaries(db_path,project,[r['route'] for r in routes]))
+            proposal = (propose(routes,reviewed,prior_evidence=summaries(db_path,project,[r['route'] for r in routes])+project_context(db_path,project))
                         if planner is propose else planner(routes,reviewed))
             record(db_path,run_id,'ai_proposal',proposal)
             action = proposal.get('action','')

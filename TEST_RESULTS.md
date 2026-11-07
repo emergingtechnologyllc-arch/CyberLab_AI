@@ -1,60 +1,86 @@
-# CyberLab 4.12.0 validation
+# CyberLab 4.13.0 — local production validation
 
-Validation host: Debian GNU/Linux 13, Python 3.12.14. Browser: system Chromium
-controlled by Playwright. No personal Ubuntu installation or database was changed.
+Host: Debian GNU/Linux 13, Python 3.12.14, Waitress 3.0.2. Optional browser tooling:
+system Chromium/Playwright. No personal Ubuntu installation or database was accessed.
 
-| Check | Result |
+## Executed checks
+
+| Check | Observed result |
 |---|---|
-| `python3 -m unittest discover -s tests -v` | 76 passed, 0 failed, 0 skipped |
-| `python3 scripts/smoke_test.py` | 11 passed; PASS, exit 0 |
-| Fresh ZIP extraction: full suite | 76 passed, 0 failed, 0 skipped |
-| Fresh ZIP extraction: standalone smoke | 11 passed; PASS, exit 0 |
-| `python3 scripts/browser_check.py --screenshots …` | Passed functional workflow and 24 responsive page checks |
-| `python3 -m py_compile cyberlab/*.py` | Passed |
-| Deterministic ZIP builds from identical source | Identical SHA256 hashes |
-| Legacy `start-cyberlab-v4.sh` wrapper | HTTP 200 with current CyberLab release |
-| Real Ollama for this release | Not run; no local service/model available |
-| Ubuntu 4.12 acceptance | Not run; cloud host is Debian |
+| Complete regression suite | 108 passed, 0 failed, 0 skipped |
+| Isolated offline smoke | 14 passed; exit 0 |
+| Waitress health, HEAD/method/body limits | Passed real HTTP checks |
+| Public CISA KEV download and normalization | Passed: 1,769 saved records |
+| Public MITRE enterprise ATT&CK download/normalization | Passed: 706 active technique records |
+| Public CVE Program delta and documents | Passed; initial 1-record delta, later windows processed |
+| Persistent CVE backlog | Live run processed 20 records and retained 4 pending; mocked 304 catch-up passed |
+| Actual production installer | Passed offline hash-verified dependency install and isolated smoke before activation |
+| Stable installed launcher | Running; /healthz returned status ok, transport waitress, database ok, intelligence worker running |
+| Generated systemd user unit syntax | Passed systemd-analyze --user verify after setting XDG_RUNTIME_DIR to a writable temporary directory |
+| Actual systemd service enable/start | Not run; no live Ubuntu user manager available in this cloud validation |
+| Chromium application workflow | Passed project, investigation, comparison, change review, verification, monitoring |
+| Responsive browser checks | 27 pages: nine destinations × desktop/tablet/phone sizes |
+| Browser live-cache search/detail and guide | Passed actual cached references and in-app guide |
+| Live OSV request | Blocked by this cloud's outbound proxy: HTTP tunnel 403 |
+| Live NVD connectivity probe | Blocked by this cloud's outbound proxy: HTTP tunnel 403; NVD integration is not implemented |
+| Real Ollama inference | Not verified; no local Ollama service in this execution environment |
+| Ubuntu 4.13 runtime/service/model acceptance | Not run; requires the user's Ubuntu host |
 
-## What ran
+Source counts are observations from the validation run, not immutable current-world
+statistics. Publisher contents can change. The CVE library grew to 41 stored records
+as later windows arrived; a bounded backlog is explicitly separate from saved records.
+A fresh delta/window does not imply a complete historical CVE mirror.
 
-The 76-test suite retains all original 39 backend regressions and tests added in
-the v4.11 work. UI-specific assertions were updated for the deliberate navigation
-and version changes; authorization, persistence and evidence assertions remain.
-The new checks cover all workspace routes, CSS delivery, fixed asset paths,
-non-destructive project creation, sample files, invalid paths and modes, CSRF,
-project context, literal project-name filtering and read-only model-tag checks.
+## Regression and failure-path evidence
 
-The standalone smoke command starts its own isolated subprocess with temporary
-storage. It exercises real HTTP requests and restarts, source-linked evidence,
-project creation, authorization rejection, monitoring pause/resume and provenance.
-It neither reads nor changes the user's personal database.
+The original 39 backend regressions remain, with the existing UI/4.11/4.12 tests.
+New production checks cover atomic cache replacement, invalid snapshots, no-cache
+304 handling, successful conditional refresh, fixed publisher destinations,
+CVE rejection, durable backlog and 304 processing, cancellation on changed source
+preferences, duplicate leases, literal search, stale-state persistence, root-proven
+advisory aliases, source context links, and immutable historical reference revisions.
 
-The Chromium workflow uses actual forms to create a sample project, establish a
-baseline, add a real synthetic route file, compare it, open the resulting change
-review, run an offline verification, and enable/pause monitoring. It confirms that
-scheduled AI stays off unless opted in. It visits Overview, Projects,
-Investigations, Monitoring, Intelligence, Evidence, Verification and Settings at
-1440×1000, 768×1024 and 390×844, checking successful responses and absence of document
-horizontal overflow. Screenshots were inspected; mobile navigation exposes every
-destination and activity tables remove redundant columns on narrow screens.
+Runtime tests cover bounded/deduplicated jobs, cancellation of queued work during
+shutdown, single-instance locking, consistent private/exclusive backups, release
+transition backups, interrupted-run recovery and directory-walk budgets. Installer tests cover per-setting
+systemd path quoting, symlink refusal, unmanaged-file protection, code/config
+activation with previous-release retention, and rejection of a tampered wheel.
 
-Fresh package tests execute **inside the extracted application directory**, so
-imports, launchers and CSS are verified independently of the original checkout.
-The ZIP contains no caches, databases, .env files or prior release archives.
+HTTP tests cover production health, HEAD, unsupported methods, body limits, existing
+CSRF/authorization rules, new source configuration validation, the guide/download,
+project isolation, restart persistence and existing risk/memory/history endpoints.
+Offline tests use temporary data/projects and disable public background refresh;
+they do not replace public network tests or real-model checks with a passing label.
 
-## Limits
+## Release gates
 
-AI successes in regression tests use mocks. The Settings connection check reads
-Ollama's model list; this alone does not establish generation compatibility.
-Use `python3 scripts/smoke_test.py --live-ollama` on a machine with Ollama/model
-running to require a real schema-valid recommendation tied to actual evidence.
-The previously observed live smoke failure was connection refused on loopback.
-Offline tests do not validate external OSV access.
+The independent fresh ZIP extraction passed the full 108-test suite, all 14 smoke
+checks, the Chromium workflow and 27 responsive page checks. Installation from that
+extraction passed its offline hash-verified runtime installation and smoke gate.
+An actual installed-instance reinstall retained saved paths, port and refresh
+preferences, kept the previous code release, created a database backup, and showed
+the original baseline evidence after restart. The installed printable PDF download
+was checked for a valid PDF signature.
 
-The user reported a successful v4.11 smoke test and launcher on Ubuntu. That is
-not a v4.12 Ubuntu result. The new GUI was tested in Chromium on Debian; the user
-must verify their installed browser and local model after upgrading.
+Two package builds from identical source produced matching SHA256 hashes. The
+shared allowlist includes the production wheel, Markdown/operations guides and a
+9-page printable PDF, while excluding caches, virtual environments, databases,
+credentials and historical release archives. The PDF was inspected and its text
+was extracted to confirm the first/last topics, installation commands and coverage
+limitations; it contains no JavaScript.
 
-No vulnerability was confirmed. Test status mismatches are synthetic observations,
-and AI suggestions remain read-only until a separate verification is approved.
+Ubuntu/Python 3.10 and 3.12 CI jobs were added for regression, offline installation
+and package/source consistency checks. Their remote execution result is not claimed
+by these local validation results.
+
+## Interpretation
+
+This is an implemented and tested **single-user local production profile**, not a
+security certification or an Internet-facing multi-user service. Model successes
+in the regression suite use mocks. Source data is public reference context, never
+proof of project exploitability. An observation/status mismatch alone is not a
+confirmed vulnerability. Keep Ubuntu service, live-model and external OSV results
+separate from the cloud checks that actually passed.
+
+The OSV hostname has been added to the cloud configuration draft for review; saving
+that draft is not proof that outbound access has been applied or verified.

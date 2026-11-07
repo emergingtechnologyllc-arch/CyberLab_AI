@@ -26,7 +26,7 @@ class DashboardTests(unittest.TestCase):
         with socket.socket() as sock:
             sock.bind(('127.0.0.1',0)); cls.port = sock.getsockname()[1]
         cls.url = f'http://127.0.0.1:{cls.port}'
-        cls.env = dict(os.environ, CYBERLAB_DATA_DIR=str(cls.data),
+        cls.env = dict(os.environ,CYBERLAB_AUTO_INTELLIGENCE="0", CYBERLAB_DATA_DIR=str(cls.data),
                        CYBERLAB_PROJECTS_DIR=str(cls.projects), CYBERLAB_V4_PORT=str(cls.port))
         cls.log = open(cls.root/'server.log','w+')
         cls.start()
@@ -177,6 +177,39 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(status,200)
         self.assertNotIn(f'href="/continuous/{aid}?project=demo"',body)
         self.assertEqual(self.request('/investigations?project=not-a-project')[0],400)
+
+    def test_production_health_methods_and_body_limits(self):
+        with urllib.request.urlopen(self.url+'/healthz') as response:
+            data=json.load(response)
+            self.assertEqual(data['transport'],'waitress'); self.assertEqual(data['status'],'ok')
+            self.assertEqual(data['intelligence_worker'],'paused')
+        request=urllib.request.Request(self.url+'/healthz',method='HEAD')
+        with urllib.request.urlopen(request) as response: self.assertEqual(response.read(),b'')
+        request=urllib.request.Request(self.url+'/',method='TRACE')
+        with self.assertRaises(urllib.error.HTTPError) as error: urllib.request.urlopen(request)
+        self.assertEqual(error.exception.code,405)
+        request=urllib.request.Request(self.url+'/projects/create',data=b'x'*5000)
+        with self.assertRaises(urllib.error.HTTPError) as error: urllib.request.urlopen(request)
+        self.assertEqual(error.exception.code,413)
+
+    def test_help_and_download_are_available(self):
+        status,body=self.request('/help')
+        self.assertEqual(status,200)
+        self.assertIn('The simple explanation',body)
+        self.assertIn('Download guide',body)
+        self.assertNotIn('<script>',body)
+        status,guide=self.request('/help/download')
+        self.assertEqual(status,200)
+        self.assertIn('# CyberLab: How to Use',guide)
+
+    def test_intelligence_configuration_requires_consent_and_valid_source(self):
+        self.assertEqual(self.request('/knowledge/configure',{'source':'kev','interval':'3600'})[0],400)
+        self.assertEqual(self.request('/knowledge/configure',self.form(source='untrusted',interval='3600'))[0],400)
+        self.assertEqual(self.request('/knowledge/refresh',self.form(source='untrusted'))[0],400)
+        self.assertEqual(self.request('/knowledge/configure',self.form(source='kev',interval='3600'))[0],200)
+        from cyberlab import knowledge
+        self.assertFalse(next(s['enabled'] for s in knowledge.status(self.db) if s['source']=='kev'))
+        self.assertEqual(self.request('/knowledge/not-a-source/CVE-2026-12345')[0],404)
 
     def test_unknown_recommendation_and_nested_project_rejected(self):
         self.assertEqual(self.request('/changes/analyze',self.form(investigation='999999'))[0],400)

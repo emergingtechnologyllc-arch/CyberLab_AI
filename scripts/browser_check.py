@@ -24,7 +24,7 @@ def main():
         with socket.socket() as sock:
             sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]
         address=f'http://127.0.0.1:{port}'
-        env=dict(os.environ,CYBERLAB_DATA_DIR=str(base/'data'),CYBERLAB_PROJECTS_DIR=str(base/'projects'),CYBERLAB_V4_PORT=str(port))
+        env=dict(os.environ,CYBERLAB_AUTO_INTELLIGENCE="0",CYBERLAB_DATA_DIR=str(base/'data'),CYBERLAB_PROJECTS_DIR=str(base/'projects'),CYBERLAB_V4_PORT=str(port))
         with (base/'server.log').open('w+') as log:
             process=subprocess.Popen(['bash','./start.sh'],cwd=ROOT,env=env,stdout=log,stderr=log)
             try:
@@ -88,7 +88,7 @@ def main():
                     if args.screenshots: page.screenshot(path=str(args.screenshots/'overview-desktop.png'),full_page=True)
                     for width,height in [(1440,1000),(768,1024),(390,844)]:
                         page.set_viewport_size({'width':width,'height':height})
-                        for path in ['/','/projects','/investigations','/monitoring','/intelligence','/evidence','/verification','/settings']:
+                        for path in ['/','/projects','/investigations','/monitoring','/intelligence','/evidence','/verification','/settings','/help']:
                             response=page.goto(address+path+'?project=sample-workspace')
                             assert response.status==200,(path,response.status)
                             assert not page.evaluate('document.documentElement.scrollWidth > innerWidth'),(width,path,'horizontal overflow')
@@ -96,7 +96,7 @@ def main():
                         page.goto(address+'/'); page.screenshot(path=str(args.screenshots/'overview-mobile.png'),full_page=True)
                     assert not errors,errors
                     browser.close()
-                print('PASS: browser project creation, investigation, change review, evidence, monitoring, and 24 responsive page checks')
+                print('PASS: browser project creation, investigation, change review, evidence, monitoring, and 27 responsive page checks')
             finally:
                 process.terminate(); process.wait(timeout=25)
 

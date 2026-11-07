@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import sqlite3
 import urllib.request
+import time
 
 OSV_URL = 'https://api.osv.dev/v1/querybatch'
 MAX_RESPONSE = 2_000_000
@@ -16,6 +17,7 @@ MAX_PACKAGES = 75
 
 def initialize(db_path):
     with sqlite3.connect(db_path, timeout=15) as db:
+        db.execute('BEGIN IMMEDIATE')
         db.execute('''CREATE TABLE IF NOT EXISTS advisories (
             id TEXT PRIMARY KEY, modified TEXT, summary TEXT, aliases TEXT,
             reference TEXT, raw TEXT, fetched TEXT)''')
@@ -25,6 +27,10 @@ def initialize(db_path):
         db.execute('''CREATE TABLE IF NOT EXISTS intelligence_matches (
             check_id INTEGER, package TEXT, declared TEXT, advisory_id TEXT,
             assessment TEXT, reason TEXT)''')
+
+        if 'project_root' not in {r[1] for r in db.execute('PRAGMA table_info(intelligence_checks)')}:
+            db.execute("ALTER TABLE intelligence_checks ADD COLUMN project_root TEXT NOT NULL DEFAULT ''")
+        db.execute('CREATE INDEX IF NOT EXISTS intelligence_root ON intelligence_checks(project_root,id)')
 
 
 def utcnow():
@@ -42,9 +48,12 @@ def project_manifest(project, projects_base):
     if manifest.stat().st_size > MAX_MANIFEST:
         raise ValueError('Manifest exceeds maximum size')
     data = json.loads(manifest.read_text('utf-8'))
+    if not isinstance(data,dict): raise ValueError('Manifest must be a JSON object')
     packages = {}
     for group in ('dependencies', 'devDependencies'):
-        for name, spec in data.get(group, {}).items():
+        dependencies=data.get(group,{})
+        if not isinstance(dependencies,dict): raise ValueError('Dependency groups must be JSON objects')
+        for name, spec in dependencies.items():
             if not isinstance(name, str) or not isinstance(spec, str):
                 continue
             if re.fullmatch(r'(?:@[-a-zA-Z0-9_.]+/)?[-a-zA-Z0-9_.]+', name):
@@ -89,12 +98,14 @@ def osv_details(ids, opener=None):
     if opener is None:
         opener = urllib.request.urlopen
     details = {}
-    for advisory_id in sorted(set(ids))[:150]:
+    deadline=time.monotonic()+45
+    for advisory_id in sorted(set(ids))[:25]:
+        if time.monotonic()>deadline: raise TimeoutError('Advisory detail budget exhausted')
         if not re.fullmatch(r'[A-Za-z0-9_.-]{3,100}', advisory_id):
             continue
         req = urllib.request.Request('https://api.osv.dev/v1/vulns/' + advisory_id,
             headers={'User-Agent':f'CyberLab/{__version__}'})
-        with opener(req, timeout=15) as response:
+        with opener(req, timeout=min(8,max(.1,deadline-time.monotonic()))) as response:
             raw = response.read(100_001)
         if len(raw) > 100_000:
             continue
@@ -108,8 +119,8 @@ def check_project(db_path, project, projects_base, query=osv_batch_query, detail
     name, packages = project_manifest(project, projects_base)
     initialize(db_path)
     with sqlite3.connect(db_path, timeout=15) as db:
-        cur = db.execute('INSERT INTO intelligence_checks(created,project,status,package_count,match_count,error) VALUES(?,?,?,?,?,?)',
-                         (utcnow(), name, 'running', len(packages), 0, ''))
+        cur = db.execute('INSERT INTO intelligence_checks(created,project,status,package_count,match_count,error,project_root) VALUES(?,?,?,?,?,?,?)',
+                         (utcnow(), name, 'running', len(packages), 0, '', str(Path(project).resolve())))
         check_id = cur.lastrowid
     try:
         results = query(packages)
@@ -157,6 +168,16 @@ def check_detail(db_path, check_id):
         check = db.execute('SELECT * FROM intelligence_checks WHERE id=?', (check_id,)).fetchone()
         if not check:
             return None
-        rows = db.execute('''SELECT m.*, a.summary, a.reference, a.modified FROM intelligence_matches m
+        rows = db.execute('''SELECT m.*, a.summary, a.reference, a.modified, a.aliases FROM intelligence_matches m
             LEFT JOIN advisories a ON a.id=m.advisory_id WHERE m.check_id=? ORDER BY m.package,m.advisory_id''', (check_id,)).fetchall()
-        return dict(check), [dict(row) for row in rows]
+        result=[dict(row) for row in rows]
+        from . import knowledge
+        knowledge.initialize(db_path)
+        with sqlite3.connect(db_path) as library:
+            exploited={r[0] for r in library.execute("SELECT external_id FROM knowledge_records WHERE source='kev'")}
+        if not check['project_root']: exploited=set()
+        for row in result:
+            try: aliases=json.loads(row.get('aliases') or '[]')
+            except (ValueError,TypeError): aliases=[]
+            row['known_exploited_reference']=bool(exploited.intersection([row['advisory_id']]+(aliases if isinstance(aliases,list) else [])))
+        return dict(check), result

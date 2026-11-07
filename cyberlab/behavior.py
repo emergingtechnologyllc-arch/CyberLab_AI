@@ -6,6 +6,7 @@ import re
 import sqlite3
 
 MAX_FILES = 3000
+MAX_DIRECTORIES = 5000
 MAX_ROUTES = 250
 MAX_FILE_BYTES = 100_000
 ROUTE_FILES = {'route.js','route.ts','route.jsx','route.tsx'}
@@ -48,11 +49,15 @@ def inventory(project, base):
     skip = {'node_modules','.git','.next','dist','build','coverage','.venv'}
     routes = []
     seen = 0
+    directories_seen = 0
     def on_error(exc):
         raise ValueError('Unable to read project directory') from exc
     # Do not follow directory symlinks; do not open source files, credentials, or env files.
     import os
     for directory, dirs, files in os.walk(root, followlinks=False, onerror=on_error):
+        directories_seen += 1
+        if directories_seen > MAX_DIRECTORIES:
+            raise ValueError('Project exceeds inventory directory budget')
         dirs[:] = [d for d in dirs if d not in skip and not (Path(directory)/d).is_symlink()]
         for filename in files:
             seen += 1

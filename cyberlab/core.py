@@ -103,7 +103,7 @@ def ask_ollama(observations, history):
                        'format':'json', 'messages':[{'role':'system','content':system},{'role':'user','content':prompt}],
                        'options':{'temperature':0}}).encode()
     request = urllib.request.Request(OLLAMA, data=body, headers={'Content-Type':'application/json'})
-    with urllib.request.urlopen(request, timeout=90) as response:
+    with urllib.request.urlopen(request, timeout=30) as response:
         data = json.loads(response.read(MAX_BYTES))
     proposal = json.loads(data['message']['content'])
     if not isinstance(proposal, dict):
