@@ -1,3 +1,26 @@
+# CyberLab release history
+
+## 4.12.0 — Unified workspace
+
+* Replaced the stacked, version-labeled forms with a responsive light workspace,
+  persistent navigation and separate pages for each task.
+* Added overview metrics, project selection, activity tables, guided investigation
+  choices, source-linked change reviews and readable status badges.
+* Added project creation and a complete sample workspace with both an offline
+  fixture and a localhost verification plan. Existing directories are never overwritten.
+* Unified all existing capabilities into a single root-level application. Historical
+  v4.11 source is retained only as a release archive.
+* Centralized the release version in cyberlab/__init__.py; the UI, server banner,
+  settings and HTTP user agents use it. Removed historical module version labels.
+* Added a stable start.sh launcher and cyberlab-ai.zip package name; retained the
+  prior launcher command as a compatibility wrapper.
+* Added explicit model connectivity checking in Settings without triggering AI.
+* Preserved existing POST endpoints, authorization/CSRF checks, scoped evidence,
+  additive database migrations and offline operation.
+* Added HTTP workspace regressions and a real Chromium browser workflow covering
+  project creation, route comparison, change review, verification, monitoring and
+  24 responsive page checks.
+
 # v4.11 — based directly on v4.9
 
 v4.10 was never created. The supplied v4.9 is preserved separately.

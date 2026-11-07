@@ -1,6 +1,7 @@
 """Conservative advisory ingestion and package inventory. No vulnerability confirmation."""
 import datetime as dt
 import json
+from . import __version__
 import os
 from pathlib import Path
 import re
@@ -70,7 +71,7 @@ def osv_batch_query(packages, opener=None):
         return []
     payload = json.dumps({'queries': queries}).encode()
     request = urllib.request.Request(OSV_URL, data=payload,
-        headers={'Content-Type':'application/json','User-Agent':'CyberLab-v4.2/1.0'}, method='POST')
+        headers={'Content-Type':'application/json','User-Agent':f'CyberLab/{__version__}'}, method='POST')
     if opener is None:
         opener = urllib.request.urlopen
     with opener(request, timeout=20) as response:
@@ -92,7 +93,7 @@ def osv_details(ids, opener=None):
         if not re.fullmatch(r'[A-Za-z0-9_.-]{3,100}', advisory_id):
             continue
         req = urllib.request.Request('https://api.osv.dev/v1/vulns/' + advisory_id,
-            headers={'User-Agent':'CyberLab-v4.2/1.0'})
+            headers={'User-Agent':f'CyberLab/{__version__}'})
         with opener(req, timeout=15) as response:
             raw = response.read(100_001)
         if len(raw) > 100_000:

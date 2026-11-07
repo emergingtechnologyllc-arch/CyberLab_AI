@@ -1,4 +1,4 @@
-"""v4.11 repeatable, bounded project change assessments. No network scans."""
+"""repeatable, bounded project change assessments. No network scans."""
 import datetime as dt
 import hashlib
 import json

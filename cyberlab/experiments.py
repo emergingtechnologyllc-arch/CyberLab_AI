@@ -1,4 +1,4 @@
-"""v4.5 bounded, offline, synthetic authorization experiments.
+"""bounded, offline, synthetic authorization experiments.
 
 A fixture contains two synthetic accounts and their expected resource ownership.
 This is a demonstration of evidence verification, NOT a test of a real endpoint.

@@ -1,4 +1,4 @@
-"""v4.8: evidence-backed relationship analysis. No automatic vulnerability confirmation."""
+"""evidence-backed relationship analysis. No automatic vulnerability confirmation."""
 import datetime as dt
 import json
 import os

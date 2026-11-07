@@ -1,3 +1,34 @@
+# Unified workspace design and implementation
+
+The old dashboard exposed the release history as separate version-labeled forms.
+It repeated the project input and safety text, hid the workflow, and made every
+capability compete for attention on a long page. The source layout also suggested
+that users should choose between independent programs.
+
+The current application retains the existing backend capabilities and data model,
+but uses a shared server-rendered frame, task navigation and selected-project
+context. The overview presents real database counts and activity; it does not
+invent a security score or claim that a project is safe. New investigation choices
+dispatch to the existing allowlisted controllers. The separate verification page
+keeps consent for active checks explicit. Detail pages share the workspace style;
+change reviews prioritize readable route changes and recommendations, with raw
+technical metadata collapsed behind an expander.
+
+The UI requires no JavaScript, CDN, fonts or third-party runtime dependencies.
+All content is escaped and the CSS is served from a fixed allowlisted asset path
+under the existing CSP. Mobile navigation keeps every destination accessible;
+activity tables hide redundant columns on small screens instead of clipping text.
+Project creation uses a bounded name and exclusive directory creation, never
+an overwrite. History filters use exact project names/roots rather than LIKE
+patterns, avoiding wildcard confusion in names containing underscores.
+
+The source now has one root-level Python package, scripts directory and test suite.
+The version constant drives visible release metadata and HTTP user agents. ZIP
+packaging includes CSS explicitly and keeps one stable application root and name.
+Historical releases remain archives, not alternative current source directories.
+
+Earlier inspection notes follow for engineering history.
+
 # Inspection and optimization report
 
 The supplied archive contains v4.9, not the v4.10 described in the handoff.

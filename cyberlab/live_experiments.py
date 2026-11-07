@@ -1,4 +1,4 @@
-"""v4.6 controlled localhost GET experiments using synthetic account labels.
+"""controlled localhost GET experiments using synthetic account labels.
 No cookies, credentials, production targets, redirects, or arbitrary HTTP methods.
 """
 import datetime as dt

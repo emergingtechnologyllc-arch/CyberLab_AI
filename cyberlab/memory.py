@@ -1,4 +1,4 @@
-"""v4.7 read-only evidence memory and conservative cross-run correlation.
+"""read-only evidence memory and conservative cross-run correlation.
 
 Records are references to existing events; no vulnerability is confirmed by correlation.
 """

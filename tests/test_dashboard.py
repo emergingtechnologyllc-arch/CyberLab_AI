@@ -11,7 +11,7 @@ import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
-from cyberlab import change_investigation as ci, continuous as c
+from cyberlab import change_investigation as ci, continuous as c, __version__
 
 
 class DashboardTests(unittest.TestCase):
@@ -33,14 +33,16 @@ class DashboardTests(unittest.TestCase):
 
     @classmethod
     def start(cls):
-        cls.proc = subprocess.Popen(['bash','./start-cyberlab-v4.sh'],env=cls.env,stdout=cls.log,stderr=cls.log)
+        cls.proc = subprocess.Popen(['bash','./start.sh'],env=cls.env,stdout=cls.log,stderr=cls.log)
         for _ in range(100):
             if cls.proc.poll() is not None:
                 cls.log.seek(0); raise AssertionError(cls.log.read())
             try:
                 with urllib.request.urlopen(cls.url,timeout=1) as r:
                     cls.html = r.read().decode()
-                cls.token = re.search(r'name="csrf" value="([^"]+)"',cls.html)[1]
+                with urllib.request.urlopen(cls.url+'/investigations',timeout=1) as form_response:
+                    form_html = form_response.read().decode()
+                cls.token = re.search(r'name="csrf" value="([^"]+)"',form_html)[1]
                 return
             except OSError: time.sleep(.05)
         raise AssertionError('Dashboard did not become ready')
@@ -67,7 +69,8 @@ class DashboardTests(unittest.TestCase):
     def test_dashboard_and_csrf_authorization(self):
         status,body = self.request()
         self.assertEqual(status,200)
-        self.assertIn('Change investigations (v4.11)',body)
+        self.assertIn('A clearer view of your projects.',body)
+        self.assertIn('CyberLab '+__version__,body)
         for values in [{'project':'demo','authorized':'yes'},{'project':'demo','csrf':self.token}]:
             self.assertEqual(self.request('/continuous/assess',values)[0],400)
         self.assertEqual(self.request('/run',self.form(target='http://example.com:80'))[0],400)
@@ -99,7 +102,7 @@ class DashboardTests(unittest.TestCase):
         self.stop(); self.start()
         self.assertEqual(self.request(f'/changes/{rid}')[0],200)
         self.assertEqual(ci.detail(self.db,rid)['status'],'recommended_review')
-        self.assertIn('paused',self.request()[1])
+        self.assertIn('Paused',self.request('/monitoring?project=demo')[1])
         self.assertEqual(self.request('/continuous/assess',self.form())[0],200)
 
     def test_provenance_links_resolve(self):
@@ -126,6 +129,54 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(status,200)
         self.assertNotIn('PRIVATE_BODY',export)
         self.assertNotIn('secret prose excluded',export)
+
+    def test_workspace_navigation_and_assets(self):
+        for path in ['/','/projects','/investigations','/monitoring','/intelligence','/evidence','/verification','/settings']:
+            with self.subTest(path=path):
+                status,body = self.request(path+'?project=demo')
+                self.assertEqual(status,200)
+                self.assertIn('aria-label="Main navigation"',body)
+                self.assertIn('/assets/app.css',body)
+                self.assertNotRegex(body,r'\(v4\.[0-9]+\)')
+        status,css = self.request('/assets/app.css')
+        self.assertEqual(status,200)
+        self.assertIn('@media',css)
+        self.assertEqual(self.request('/assets/../server.py')[0],404)
+
+    def test_project_create_sample_and_protect_existing(self):
+        values = self.form(project_name='sample-project',sample='yes')
+        self.assertEqual(self.request('/projects/create',values)[0],200)
+        root = self.projects/'sample-project'
+        self.assertTrue((root/'app/api/orders/[id]/route.ts').is_file())
+        self.assertTrue((root/'cyberlab-test-fixture.json').is_file())
+        (root/'keep.txt').write_text('preserve')
+        self.assertEqual(self.request('/projects/create',values)[0],400)
+        self.assertEqual((root/'keep.txt').read_text(),'preserve')
+        for name in ['../escape','nested/project','<script>']:
+            self.assertEqual(self.request('/projects/create',self.form(project_name=name))[0],400)
+        self.assertEqual(self.request('/projects/create',{'project_name':'unauthorized'})[0],400)
+        self.assertFalse((self.projects/'unauthorized').exists())
+
+    def test_unified_investigation_dispatch_and_validation(self):
+        self.assertEqual(self.request('/investigations/start',self.form(mode='changes'))[0],200)
+        self.assertEqual(self.request('/investigations/start',self.form(mode='execute_shell'))[0],400)
+        self.assertEqual(self.request('/investigations/start',{'project':'demo','mode':'changes','authorized':'yes'})[0],400)
+        self.assertEqual(self.request('/investigations/start',self.form(mode='changes',target='http://127.0.0.1:3999'))[0],400)
+        self.assertEqual(self.request('/investigations/start',self.form(mode='local',target='https://example.com'))[0],400)
+        values = self.form(mode='inventory'); values['project']=''
+        self.assertEqual(self.request('/investigations/start',values)[0],400)
+
+    def test_unified_verification_rejects_unapproved_modes(self):
+        self.assertEqual(self.request('/verification/start',self.form(mode='arbitrary'))[0],400)
+        self.assertEqual(self.request('/verification/start',{'project':'demo','mode':'live','csrf':self.token})[0],400)
+
+    def test_workspace_project_filter_and_unknown_project(self):
+        other = self.projects/'other-project'; other.mkdir(exist_ok=True)
+        aid = c.assess(self.db,other,self.projects)
+        status,body = self.request('/evidence?project=demo')
+        self.assertEqual(status,200)
+        self.assertNotIn(f'href="/continuous/{aid}?project=demo"',body)
+        self.assertEqual(self.request('/investigations?project=not-a-project')[0],400)
 
     def test_unknown_recommendation_and_nested_project_rejected(self):
         self.assertEqual(self.request('/changes/analyze',self.form(investigation='999999'))[0],400)

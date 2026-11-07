@@ -1,4 +1,4 @@
-"""v4.4: Ollama-guided route investigation, using metadata-only, bounded evidence.
+"""Ollama-guided route investigation, using metadata-only, bounded evidence.
 
 No source reading, external HTTP, credentials, or execution of AI-provided code.
 """

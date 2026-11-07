@@ -3,6 +3,7 @@ import datetime as dt
 import hashlib
 import ipaddress
 import json
+from . import __version__
 import os
 from pathlib import Path
 import socket
@@ -37,7 +38,7 @@ def safe_local_url(url):
     """Only literal loopback addresses; no DNS, redirects, or external requests."""
     p = urllib.parse.urlsplit(url)
     if p.scheme != 'http' or p.username or p.password or p.fragment or p.hostname not in ('127.0.0.1', '::1'):
-        raise ValueError('Only http://127.0.0.1 or http://[::1] is allowed in v4.1')
+        raise ValueError('Only http://127.0.0.1 or http://[::1] is allowed')
     if p.port is None or not 1 <= p.port <= 65535:
         raise ValueError('Specify an explicit local port')
     if p.port in (11434, 8780):
@@ -52,7 +53,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def http_headers(target):
     safe_local_url(target)
-    req = urllib.request.Request(target, method='HEAD', headers={'User-Agent': 'CyberLab-v4.2-safe-check/1.0'})
+    req = urllib.request.Request(target, method='HEAD', headers={'User-Agent': f'CyberLab/{__version__}'})
     opener = urllib.request.build_opener(NoRedirect)
     try:
         with opener.open(req, timeout=4) as resp:
