@@ -6,9 +6,10 @@ import datetime as dt
 import json
 import os
 import sqlite3
+from .provenance import migrate
 import urllib.request
 from .behavior import inventory
-from .memory import ai_context
+from .provenance import summaries
 
 MAX_ROUTES_CONTEXT = 40
 MAX_STEPS = 5
@@ -18,10 +19,12 @@ ALLOWED_ACTIONS = {'inspect_route', 'finish'}
 
 def initialize(db_path):
     with sqlite3.connect(db_path) as db:
+        db.execute('BEGIN IMMEDIATE')
         db.execute('''CREATE TABLE IF NOT EXISTS ai_behavior_runs
             (id INTEGER PRIMARY KEY, created TEXT, project TEXT, status TEXT, summary TEXT)''')
         db.execute('''CREATE TABLE IF NOT EXISTS ai_behavior_events
             (id INTEGER PRIMARY KEY, run_id INTEGER, kind TEXT, payload TEXT)''')
+        migrate(db, 'ai_behavior_runs')
 
 
 def record(db_path, run_id, kind, payload):
@@ -70,15 +73,15 @@ def run(db_path, project, base, planner=propose):
     initialize(db_path)
     routes = inventory(project,base)
     with sqlite3.connect(db_path) as db:
-        run_id = db.execute('INSERT INTO ai_behavior_runs(created,project,status,summary) VALUES(?,?,?,?)',
+        run_id = db.execute('INSERT INTO ai_behavior_runs(created,project,status,summary,project_root) VALUES(?,?,?,?,?)',
             (dt.datetime.now(dt.timezone.utc).isoformat(),os.path.basename(os.path.realpath(project)),
-             'running','')).lastrowid
+             'running','',os.path.realpath(project))).lastrowid
     reviewed = set()
     lookup = {r['route']:r for r in routes}
     record(db_path,run_id,'inventory',{'route_count':len(routes),'scope':'filename-only; no source read'})
     try:
         for step in range(MAX_STEPS):
-            proposal = (propose(routes,reviewed,prior_evidence=ai_context(db_path,os.path.basename(os.path.realpath(project))))
+            proposal = (propose(routes,reviewed,prior_evidence=summaries(db_path,project,[r['route'] for r in routes]))
                         if planner is propose else planner(routes,reviewed))
             record(db_path,run_id,'ai_proposal',proposal)
             action = proposal.get('action','')

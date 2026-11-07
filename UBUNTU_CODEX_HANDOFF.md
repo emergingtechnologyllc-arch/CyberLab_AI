@@ -1,4 +1,12 @@
-# Ubuntu Codex: complete and validate CyberLab AI
+# Ubuntu Codex: validate CyberLab AI locally
+
+Cloud completion status: 67 regression tests and 6 offline smoke checks pass.
+Use `python3 scripts/smoke_test.py` from `cyberlab_v4_11/` for isolated testing,
+`python3 scripts/smoke_test.py --live-ollama` for required real-model testing,
+and `python3 scripts/package_release.py` to rebuild the release ZIP.
+Ubuntu acceptance and real Ollama remain unverified; the available cloud host
+is Debian and has no Ollama service. Treat the checklist below as acceptance
+criteria to verify, rather than reimplementing features already present.
 
 The user requests that you finish the local project and provide a program they can
 run to test the outcome. Treat this as an implementation task, not just a review.
@@ -11,17 +19,17 @@ do not create another worktree unless requested.
 - Current source is `cyberlab_v4_11/`; the root ZIP is a previous build, not an
   automatically synchronized output.
 - Read its README.md, ANALYSIS.md, CHANGELOG.md and TEST_RESULTS.md before editing.
-- Cloud validation: 59 tests passed on Debian 13 / Python 3.12.14, including the
+- Cloud validation: 67 tests passed on Debian 13 / Python 3.12.14, including the
   original 39 regressions. Ubuntu and real Ollama have NOT been verified.
 - Current implementation provides opt-in scheduled filename inventory assessment,
   persisted changes, bounded read-only Ollama recommendations, and manual review.
-- Important unfinished work: recommendations currently use current/previous
-  inventory snapshots only. They do not incorporate prior AI/live evidence because
-  those old tables identify projects by name, not canonical root.
+- Completion follow-up: recommendations now use current/previous inventory snapshots plus bounded root-scoped prior evidence.
+  New hypothesis/live runs now capture canonical roots; old unknown-root records
+  remain excluded. The earlier provenance implementation gap is resolved.
 - No automatic remediation, NVD/vector pipeline or zero-day detection is implemented.
   Do not describe those aspirational capabilities as working.
 
-## Work to complete
+## Acceptance checklist (implementation completed in cloud; verify locally)
 
 1. Inspect the Ubuntu runtime, checkout changes, Python/Codex versions, local
    installations, Ollama availability and model names. Never print credentials.
@@ -64,7 +72,7 @@ do not create another worktree unless requested.
    features, data and tests. Use the Python standard library unless a dependency
    has a clear demonstrated need.
 
-## Required deliverables
+## Deliverables and local validation
 
 - Complete runnable source and updated README.md, CHANGELOG.md, ANALYSIS.md and
   TEST_RESULTS.md with exact commands, counts, skipped/unrun checks, platform,

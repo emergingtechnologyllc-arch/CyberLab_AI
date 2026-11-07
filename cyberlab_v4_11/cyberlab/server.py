@@ -41,6 +41,21 @@ def esc(x):
     return html.escape(str(x), quote=True)
 
 
+def evidence_url(evidence):
+    source, number = evidence['id'].split(':')
+    if source == 'assessment':
+        return '/continuous/' + number
+    prefix = {'ai_event': '/ai-behavior/', 'live_event': '/live/'}[source]
+    return prefix + str(evidence['run_id'])
+
+
+def status_label(status):
+    return {'unchanged':'no changes', 'baseline':'baseline established',
+            'pending_analysis':'pending analysis', 'recommended_review':'recommended review',
+            'model_unavailable':'model unavailable', 'model_invalid':'analysis failed: invalid model response',
+            'analysis_failed':'analysis failed', 'verified_local_observation':'verified local observation (not a confirmed vulnerability)'}.get(status,status)
+
+
 def page(content):
     return ('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             '<title>CyberLab AI v4.11</title><style>body{font:16px system-ui;max-width:950px;margin:3rem auto;padding:0 1rem;background:#101827;color:#e7eefc}'
@@ -91,8 +106,8 @@ class Handler(BaseHTTPRequestHandler):
             ai_items = ''.join(f'<li><a href="/ai-behavior/{c["id"]}">AI investigation #{c["id"]}</a> — {esc(c["project"])} — {esc(c["status"])}</li>' for c in ai_checks)
             behavior_items = ''.join(f'<li><a href="/behavior/{c["id"]}">Inventory #{c["id"]}</a> — {esc(c["project"])} — {esc(c["status"])} — {c["route_count"]} routes</li>' for c in behavior_checks)
             items = ''.join(f'<li><a href="/runs/{rid}">Run #{rid}</a> — {esc(status)} — {esc(created)}</li>' for rid,created,status in rows)
-            change_items = ''.join(f'<li><a href="/changes/{r["id"]}">Recommendation #{r["id"]}</a> — {esc(r["status"])}</li>' for r in changes.recent(DB))
-            monitor_items = ''.join(f'<li>{esc(Path(r["project_root"]).name)} — {"running" if r["enabled"] else "paused"} — {esc(r["status"])} — last assessment {esc(r["last_assessment"])}</li>' for r in monitor.settings(DB))
+            change_items = ''.join(f'<li><a href="/changes/{r["id"]}">Recommendation #{r["id"]}</a> — {esc(status_label(r["status"]))}</li>' for r in changes.recent(DB))
+            monitor_items = ''.join(f'<li>{esc(Path(r["project_root"]).name)} — {"running" if r["enabled"] else "paused"} — {esc(status_label(r["status"]))} — last assessment {esc(r["last_assessment"])}</li>' for r in monitor.settings(DB))
             new_section = (f'<section><h2>Change investigations (v4.11)</h2><p>Filename changes produce read-only recommendations. AI text never executes actions or confirms a vulnerability.</p><ul>{change_items or "<li>No changes awaiting review</li>"}</ul></section>'
                 f'<section><h2>Scheduled project monitoring</h2><p>Runs only while CyberLab is running. Pausing stops future assessments; an in-flight assessment may finish.</p><ul>{monitor_items or "<li>Monitoring is off</li>"}</ul>'
                 f'<form method="post" action="/monitor/configure"><input type="hidden" name="csrf" value="{TOKEN}">'
@@ -162,9 +177,9 @@ class Handler(BaseHTTPRequestHandler):
             record = changes.detail(DB, int(p[len('/changes/'):]))
             if record is None:
                 self.send_html(page('<p>Not found</p>'),404); return
-            evidence_links = ''.join(f'<li><a href="/continuous/{esc(e["id"].split(":")[1])}">{esc(e["id"])}</a></li>' for e in record['context']['evidence'])
-            content = (f'<p><a href="/">Dashboard</a></p><section><h2>Change investigation #{record["id"]}</h2><p>{esc(record["status"])}</p>'
-                f'<pre>{esc(json.dumps(record["context"],indent=2))}</pre><ul>{evidence_links}</ul><pre>{esc(json.dumps(record["recommendation"],indent=2))}</pre>'
+            evidence_links = ''.join(f'<li><a href="{esc(evidence_url(e))}">{esc(e["id"])}</a></li>' for e in record['context']['evidence'] + record['local_observations'])
+            content = (f'<p><a href="/">Dashboard</a></p><section><h2>Change investigation #{record["id"]}</h2><p>{esc(status_label(record["status"]))}</p><p>{esc(status_label(record["observation_status"]))}</p>'
+                f'<pre>{esc(json.dumps(record["local_observations"],indent=2))}</pre><pre>{esc(json.dumps(record["context"],indent=2))}</pre><ul>{evidence_links}</ul><pre>{esc(json.dumps(record["recommendation"],indent=2))}</pre>'
                 f'<p><a href="/changes-export/{record["id"]}">Export sanitized JSON</a></p><form method="post" action="/changes/analyze"><input type="hidden" name="csrf" value="{TOKEN}"><input type="hidden" name="investigation" value="{record["id"]}">'
                 '<p><label><input style="width:auto" type="checkbox" name="authorized" value="yes" required> I authorize read-only Ollama analysis</label></p><button>Request analysis / retry</button></form>'
                 '<p>Manual review required. This button does not authorize or run live verification. Use the existing controlled localhost verification form after reviewing its synthetic plan.</p></section>')

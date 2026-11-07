@@ -12,6 +12,7 @@ Quick start with Python 3.10+ and Bash:
 
 ```bash
 cd cyberlab_v4_11
+python3 scripts/smoke_test.py
 python3 -m unittest discover -s tests -v
 bash ./start-cyberlab-v4.sh
 ```

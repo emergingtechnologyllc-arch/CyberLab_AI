@@ -48,7 +48,8 @@ model `llama3.2:latest`. Overrides: `CYBERLAB_DATA_DIR`, `CYBERLAB_PROJECTS_DIR`
 first. `CYBERLAB_LIVE_AI=1` retains the existing optional AI experiment selector.
 It does **not** enable scheduled change analysis.
 
-Startup applies additive table/index migrations. Existing investigation, risk,
+Startup applies additive table/index migrations, including canonical project
+roots for new AI and localhost runs. Unknown legacy roots are never inferred. Existing investigation, risk,
 memory, experiment, and history records are retained. Legacy inventory rows lack
 a canonical project root, so the first v4.11 assessment establishes a new baseline
 instead of guessing which project owned them. The old rows remain viewable.
@@ -95,6 +96,21 @@ python3 -m unittest discover -s tests -v
 python3 scripts/verify_ollama.py  # optional, needs a running real Ollama/model
 ```
 
+For a quick functional test with an isolated temporary database and projects:
+
+```bash
+python3 scripts/smoke_test.py
+# Also require a real local model and a validated change recommendation:
+python3 scripts/smoke_test.py --live-ollama
+# Rebuild the ZIP deterministically from the current source:
+python3 scripts/package_release.py
+```
+
+The offline smoke test prints PASS and exits zero only when its selected real
+HTTP, restart, authorization, monitoring and provenance tests pass. The optional
+live check returns nonzero when Ollama is unavailable or rejects the change schema.
+Neither command touches your personal database.
+
 The test suite includes real local HTTP requests, safe synthetic verification,
 mocked models, migration, persistence, pause/resume and concurrency checks. See
 TEST_RESULTS.md for observed counts and live-integration limitations.
@@ -108,9 +124,11 @@ zero for a live integration pass. A failure is separate from the offline suite.
   editing source without changing filenames is invisible.
 * One unchanged marker is saved after each transition; further identical
   assessments reuse it. Change events remain immutable and unique per assessment.
-* AI context is bounded to current and previous inventory evidence. Legacy
-  hypothesis/live-observation records lack root identity and are intentionally
-  excluded from change recommendations; existing risk/memory pages still work.
+* AI context includes current/previous inventory evidence and at most 12
+  root-scoped, sanitized prior hypothesis/localhost-observation references.
+  Legacy records lack root identity and remain excluded; existing history pages
+  still work. No raw hypothesis prose, bodies or credentials enter this context.
+  Later observations are displayed separately without changing the saved prompt.
 * Dynamic matching supports exact paths and an unambiguous single-segment
   `[parameter]`. Catch-all and optional/group patterns are unsupported; ambiguous
   matches are rejected. Relationships never confirm vulnerabilities.

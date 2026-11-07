@@ -102,6 +102,31 @@ class DashboardTests(unittest.TestCase):
         self.assertIn('paused',self.request()[1])
         self.assertEqual(self.request('/continuous/assess',self.form())[0],200)
 
+    def test_provenance_links_resolve(self):
+        from cyberlab import ai_behavior, live_experiments as live
+        route = self.project/'app/api/proof/[id]/route.ts'
+        route.parent.mkdir(parents=True,exist_ok=True); route.touch()
+        c.assess(self.db,self.project,self.projects)
+        def planner(routes,reviewed):
+            return dict(action='finish' if reviewed else 'inspect_route',route='/api/proof/[id]',hypothesis='secret prose excluded',reason='review')
+        ai_run = ai_behavior.run(self.db,self.project,self.projects,planner=planner)
+        plan = dict(schema_version=1,base_url='http://127.0.0.1:3999',cases=[
+            dict(route='/api/proof/[id]',path='/api/proof/1002',requester='customer_a',owner='customer_b',expected_status=403)])
+        (self.project/'cyberlab-live-plan.json').write_text(json.dumps(plan))
+        local_run = live.run(self.db,self.project,self.projects,fetcher=lambda *args: dict(status=200,body='PRIVATE_BODY'))
+        route.unlink()
+        rid = ci.ensure(self.db,c.assess(self.db,self.project,self.projects))
+        status,body = self.request(f'/changes/{rid}')
+        self.assertEqual(status,200)
+        for target in [f'/ai-behavior/{ai_run}',f'/live/{local_run}']:
+            self.assertIn(f'href="{target}"',body)
+            self.assertEqual(self.request(target)[0],200)
+        self.assertIn('verified local observation',body)
+        status,export = self.request(f'/changes-export/{rid}')
+        self.assertEqual(status,200)
+        self.assertNotIn('PRIVATE_BODY',export)
+        self.assertNotIn('secret prose excluded',export)
+
     def test_unknown_recommendation_and_nested_project_rejected(self):
         self.assertEqual(self.request('/changes/analyze',self.form(investigation='999999'))[0],400)
         nested = self.projects/'nested/demo'; nested.mkdir(parents=True,exist_ok=True)

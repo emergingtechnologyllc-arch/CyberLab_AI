@@ -22,4 +22,19 @@ v4.10 was never created. The supplied v4.9 is preserved separately.
 
 Not claimed: automatic remediation, zero-day detection, Ubuntu installation
 verification, live Ollama compatibility, or complete implementation of the broader
-system specification. Change recommendations currently use inventory history only.
+system specification. Change recommendations include root-scoped prior evidence; legacy unknown-root records remain excluded.
+
+## Completion follow-up
+
+* Added canonical-root provenance to new hypothesis and localhost runs, with
+  additive migrations and no identity inference for legacy records.
+* Included up to 12 minimal prior evidence summaries in change analysis, with
+  genuine event/run references, deterministic dynamic matching and safe status
+  classifications. Actual observation provenance is displayed separately;
+  later evidence never rewrites the saved model input.
+* Fixed evidence links for different source types and display of verified local
+  observations, which still cannot confirm vulnerabilities.
+* Added generation checks for monitoring consent so stale scheduled AI and stale
+  status updates cannot override a newer pause or settings change.
+* Added standalone isolated smoke testing, optional real-model recommendation
+  validation and deterministic ZIP packaging from an explicit file allowlist.

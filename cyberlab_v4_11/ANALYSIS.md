@@ -24,9 +24,10 @@ workflow, and avoids external dependencies. Deduplication retains one explicit
 unchanged marker for compatibility with v4.9's status API. No claim of overall
 CPU or throughput improvement is made without a workload benchmark.
 
-Known limits and remaining engineering work: model context currently uses genuine
-inventory snapshots only. Root-safe provenance must be added to the older
-name-scoped hypothesis/observation schemas before incorporating them into new
-recommendations. The broader NVD/vector/patching specification remains future work.
+The completion follow-up adds root provenance to new hypothesis/observation
+runs and admits bounded, sanitized, deterministic summaries into change analysis.
+Legacy name-only rows are preserved and excluded rather than guessing ownership.
+Monitoring settings now carry a generation counter, checked transactionally when
+claiming scheduled AI; stale work cannot override newly saved pause settings. The broader NVD/vector/patching specification remains future work.
 Monitor settings support one process per database, not distributed scheduling.
 Model prose is untrusted even when its JSON schema and evidence IDs are valid.

@@ -6,6 +6,7 @@ import sqlite3
 import urllib.error
 import urllib.request
 from . import continuous
+from .provenance import summaries
 from .core import MODEL, OLLAMA, NoRedirect
 
 ACTIONS = ('manual_review', 'inspect_route', 'request_approved_local_verification')
@@ -55,8 +56,8 @@ def ensure(path, assessment_id):
     if row['status'] != 'changed':
         return None
     changed = sorted(set(diff['added_routes'] + diff['removed_routes'] + diff.get('modified_routes', [])))
-    # Only filename evidence is admitted. Legacy name-only records cannot establish
-    # a root identity, so they are deliberately excluded from prior context.
+    # Prior records are admitted only when their canonical project root is known.
+    prior = summaries(path, row['project_root'], changed, before=row['created'])
     with sqlite3.connect(path, timeout=10) as db:
         previous = db.execute('''SELECT id,snapshot FROM continuous_runs
             WHERE project=? AND project_root=? AND id<? ORDER BY id DESC LIMIT 1''',
@@ -65,7 +66,7 @@ def ensure(path, assessment_id):
         if previous:
             evidence.append({'id': f'assessment:{previous[0]}', 'kind': 'previous_inventory'})
         context = {'assessment_id': assessment_id, 'project': row['project'],
-                   'changed_routes': changed[:250], 'diff': diff, 'evidence': evidence,
+                   'changed_routes': changed[:250], 'diff': diff, 'evidence': evidence + prior,
                    'route_relationships': [m for r in changed[:250]
                        if previous and (m := match_route(r, json.loads(previous[1])['routes']))],
                    'confirmed_vulnerability': False,
@@ -112,7 +113,7 @@ def ollama(context):
     return json.loads(json.loads(raw)['message']['content'])
 
 
-def analyze(path, rid, transport=None):
+def analyze(path, rid, transport=None, schedule=None):
     initialize(path)
     # Claim once across HTTP workers and scheduler. Network I/O is outside the transaction.
     with sqlite3.connect(path, timeout=10) as db:
@@ -122,6 +123,10 @@ def analyze(path, rid, transport=None):
             raise ValueError('Unknown change investigation')
         if row[0] not in ('pending_analysis', 'model_unavailable', 'model_invalid', 'analysis_failed'):
             return row[0]
+        if schedule is not None:
+            consent = db.execute('SELECT enabled,use_ai,generation FROM monitor_settings WHERE project_root=?', (schedule[0],)).fetchone()
+            if consent is None or not consent[0] or not consent[1] or consent[2] != schedule[1]:
+                return row[0]
         db.execute("UPDATE change_investigations SET status='analyzing',attempts=attempts+1 WHERE id=?", (rid,))
     context = json.loads(row[1])
     proposal = {}
@@ -164,4 +169,8 @@ def detail(path, rid):
     result = dict(r)
     result['context'] = json.loads(result['context'])
     result['recommendation'] = json.loads(result['recommendation'])
+    assessment = continuous.detail(path, result['assessment_id'])[0]
+    result['local_observations'] = [r for r in summaries(path, assessment['project_root'],
+        result['context']['changed_routes']) if r['kind'] == 'live_observation']
+    result['observation_status'] = ('verified_local_observation' if result['local_observations'] else 'not_tested')
     return result

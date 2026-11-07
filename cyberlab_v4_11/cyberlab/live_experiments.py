@@ -9,6 +9,7 @@ import urllib.request
 from pathlib import Path
 import re
 import sqlite3
+from .provenance import migrate
 from urllib.parse import urlsplit
 from .behavior import inventory
 
@@ -18,8 +19,10 @@ MAX_BYTES=4096
 
 def initialize(db_path):
     with sqlite3.connect(db_path) as db:
+        db.execute('BEGIN IMMEDIATE')
         db.execute("CREATE TABLE IF NOT EXISTS live_runs (id INTEGER PRIMARY KEY, created TEXT, project TEXT, status TEXT, summary TEXT)")
         db.execute("CREATE TABLE IF NOT EXISTS live_events (id INTEGER PRIMARY KEY, run_id INTEGER, kind TEXT, payload TEXT)")
+        migrate(db, 'live_runs')
 
 
 def record(db_path, run_id, kind, payload):
@@ -103,8 +106,8 @@ def run(db_path, project, base, selector=None, fetcher=fetch_local):
     if selector is None and os.getenv("CYBERLAB_LIVE_AI") == "1":
         selector=ollama_select
     with sqlite3.connect(db_path) as db:
-        rid=db.execute('INSERT INTO live_runs(created,project,status,summary) VALUES(?,?,?,?)',
-            (dt.datetime.now(dt.timezone.utc).isoformat(),Path(project).name,'running','')).lastrowid
+        rid=db.execute('INSERT INTO live_runs(created,project,status,summary,project_root) VALUES(?,?,?,?,?)',
+            (dt.datetime.now(dt.timezone.utc).isoformat(),Path(project).resolve().name,'running','',str(Path(project).resolve()))).lastrowid
     try:
         # Optional AI selector returns an index, but it cannot alter tool arguments or expand scope.
         cases=plan['cases']
