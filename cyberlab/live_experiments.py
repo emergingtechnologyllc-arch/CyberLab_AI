@@ -9,6 +9,7 @@ import urllib.request
 from pathlib import Path
 import re
 import sqlite3
+from . import identity
 from .provenance import migrate
 from urllib.parse import urlsplit
 from .behavior import inventory
@@ -103,11 +104,12 @@ def ollama_select(candidates):
 def run(db_path, project, base, selector=None, fetcher=fetch_local):
     initialize(db_path)
     plan=validate_plan(project,base)
+    project_id=identity.register(db_path,project)
     if selector is None and os.getenv("CYBERLAB_LIVE_AI") == "1":
         selector=ollama_select
     with sqlite3.connect(db_path) as db:
-        rid=db.execute('INSERT INTO live_runs(created,project,status,summary,project_root) VALUES(?,?,?,?,?)',
-            (dt.datetime.now(dt.timezone.utc).isoformat(),Path(project).resolve().name,'running','',str(Path(project).resolve()))).lastrowid
+        rid=db.execute('INSERT INTO live_runs(created,project,status,summary,project_root,project_id) VALUES(?,?,?,?,?,?)',
+            (dt.datetime.now(dt.timezone.utc).isoformat(),Path(project).resolve().name,'running','',str(Path(project).resolve()),project_id)).lastrowid
     try:
         # Optional AI selector returns an index, but it cannot alter tool arguments or expand scope.
         cases=plan['cases']

@@ -3,6 +3,7 @@ import datetime as dt
 import hashlib
 import json
 import sqlite3
+from . import identity
 from pathlib import Path
 from .behavior import inventory
 
@@ -18,6 +19,8 @@ def initialize(db_path):
         if 'project_root' not in columns:
             db.execute("ALTER TABLE continuous_runs ADD COLUMN project_root TEXT NOT NULL DEFAULT ''")
         db.execute('CREATE INDEX IF NOT EXISTS continuous_project_root ON continuous_runs(project,project_root,id)')
+        identity.migrate(db, 'continuous_runs')
+
 
 def canonical_routes(rows):
     return sorted(set(x['route'] for x in rows if isinstance(x.get('route'),str)))
@@ -46,6 +49,7 @@ def assess(db_path,project_path,base):
     encoded=json.dumps(snapshot,sort_keys=True,separators=(',',':'))
     fingerprint=hashlib.sha256(encoded.encode()).hexdigest()
     name=project_path.name
+    project_id=identity.register(db_path,project_path)
     with sqlite3.connect(db_path) as db:
         db.execute('BEGIN IMMEDIATE')
         previous=db.execute('SELECT snapshot,id,status FROM continuous_runs WHERE project=? AND project_root=? ORDER BY id DESC LIMIT 1',(name,str(project_path))).fetchone()
@@ -54,8 +58,8 @@ def assess(db_path,project_path,base):
         diff=compare(json.loads(previous[0]),snapshot) if previous else {'added_routes':[],'removed_routes':[],'modified_routes':[],'unchanged_routes':len(routes),'changed':False}
         status='baseline' if previous is None else ('changed' if diff['changed'] else 'unchanged')
         summary=f"{status}: {len(routes)} routes; {len(diff['added_routes'])} added; {len(diff['removed_routes'])} removed; {len(diff['modified_routes'])} filename metadata changes. No vulnerability confirmation."
-        rid=db.execute('INSERT INTO continuous_runs(created,project,fingerprint,status,summary,snapshot,project_root) VALUES(?,?,?,?,?,?,?)',
-            (dt.datetime.now(dt.timezone.utc).isoformat(),name,fingerprint,status,summary,encoded,str(project_path))).lastrowid
+        rid=db.execute('INSERT INTO continuous_runs(created,project,fingerprint,status,summary,snapshot,project_root,project_id) VALUES(?,?,?,?,?,?,?,?)',
+            (dt.datetime.now(dt.timezone.utc).isoformat(),name,fingerprint,status,summary,encoded,str(project_path),project_id)).lastrowid
     return rid
 
 def recent(db_path):

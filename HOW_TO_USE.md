@@ -2,6 +2,8 @@
 
 A plain-language, step-by-step guide for the local production profile.
 
+Release **4.14.0**.
+
 ## 1. The simple explanation
 
 Imagine your application is a house. CyberLab is your inspection notebook and
@@ -436,3 +438,75 @@ not repair that agent sandbox; do not run the coding agent as root as a workarou
 
 CyberLab helps organize defensive work. Human judgment, vendor patches, normal
 testing and independent review are still necessary.
+
+
+## 19. Set up your project passport (4.14)
+
+Think of the passport as the label on your inspection notebook.
+
+1. Select your project in **Active project** at the top and click **Open**.
+2. Click **Project passport** in the sidebar.
+3. Enter the responsible person/team and explain what the application does.
+4. Describe who should access which information. Do not paste passwords or keys.
+5. Choose development, staging, or production and the sensitivity of the data.
+6. Confirm the save checkbox and click **Save passport**.
+7. Review the persistent ID, canonical folder and dependency coverage on the left.
+
+These notes are declarations, not verified security controls or permission for tests.
+Each canonical folder has a stable ID. Preserve its path during upgrades. Renaming
+or moving it makes a new identity; automatic relinking is not implemented. Older
+records whose root was never captured remain in all-workspace history, but CyberLab
+will not guess ownership from a shared folder name.
+
+## 20. Read your daily briefing
+
+Think of this as the notebook's contents page, with next steps.
+
+1. Keep a project selected and click **Overview**.
+2. Read **Your daily briefing**. It is assembled when you open the page.
+3. Follow **Review evidence** for a route change, dependency check, linked CISA
+   reference, or intelligence-source problem.
+4. If coverage says unknown, run an approved advisory check. If a check is stale,
+   repeat it after reviewing dependency changes.
+5. If a candidate is linked to CISA KEV, prioritize manual investigation. Known
+   exploitation elsewhere does not prove your application can be exploited.
+
+This is deterministic saved-evidence reporting. It is not a continuous detector,
+AI training, an inbox of every new global attack, or a security clearance.
+
+## 21. Check the versions in your npm lockfile
+
+A manifest is the shopping list. A lockfile is the receipt for resolved versions.
+The receipt still does not prove what is running on the production server.
+
+1. Put `package.json` and its matching `package-lock.json` or `npm-shrinkwrap.json`
+   in the selected project root. CyberLab never installs or executes packages.
+2. Open **Intelligence**, approve the external package lookup, and run the check.
+3. Refresh the advisory history and open the completed check.
+4. Read **Dependency coverage** before interpreting any matches: queried/total
+   pairs, lockfile source, manifest consistency and unresolved entries.
+5. Review each candidate's exact version and source. Multiple versions of the
+   same package stay separate, including transitive packages.
+6. Independently verify deployed versions, affected code and reachability before
+   treating a candidate as an actionable vulnerability.
+
+Supported npm lockfile formats: 1, 2 and 3. Shrinkwrap takes precedence. Format 1
+cannot establish manifest consistency. Workspaces, links and unresolved entries
+are reported as incomplete. Files over 4 MB or inventories over 3,000 entries are
+rejected. Checks query up to 1,000 unique pairs in direct-first order; details show
+query coverage and the first 100 inventory rows. Without a supported lockfile,
+manifest-only results explicitly retain version uncertainty. No pnpm/yarn parser,
+source AST analysis or deployed dependency verification is provided in this release.
+
+## 22. Recover an incomplete CVE refresh
+
+1. Open **Intelligence** and find the CVE Program source card.
+2. Read the queued and quarantined counts. Good records remain searchable.
+3. A failed individual record automatically retries after five then ten minutes.
+   The third failure quarantines it so other downloads continue.
+4. After connectivity or the publisher document is corrected, approve and click
+   **Retry failed CVE records**, then refresh the page after the job finishes.
+5. A newer publisher revision also resets that record's failure state.
+
+“Fresh” never means all historical CVEs were downloaded. Partial status means
+records remain unresolved, even if the delta index itself downloaded successfully.

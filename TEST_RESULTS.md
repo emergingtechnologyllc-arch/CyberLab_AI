@@ -1,3 +1,32 @@
+# CyberLab 4.14.0 — validation
+
+Host: cloud Debian Linux, Python 3.12, Waitress 3.0.2. No personal Ubuntu
+installation or local database was accessed.
+
+| Check | Observed result |
+|---|---|
+| Complete regression suite | 129 passed, 0 failed, 0 skipped |
+| Isolated offline smoke | 15 passed |
+| Chromium workflow | Project creation, comparison, change review, synthetic verification, monitoring, passport save and briefing passed |
+| Responsive pages | 30 passed: ten destinations × desktop/tablet/phone |
+| Project identity | Same-named roots isolated; IDs stable; unknown legacy names excluded; proven roots migrated |
+| Dependency inventory | npm v1/v2/v3, shrinkwrap precedence, transitive/multiple versions, stale manifest, symlink/size bounds and secret URL exclusion passed |
+| Query coverage | 1,002 pairs persisted; 1,000 queried; two explicitly unqueried in bounded fixture |
+| CVE recovery | Poison record isolation, retry delay, quarantine, manual reset, newer revision and 304 recovery passed with controlled transports |
+| Running upgraded cloud app | /healthz reports 4.14.0, database ok, Waitress, intelligence worker running |
+| Database transition | before-4.14.0.sqlite3 backup created before startup migrations |
+| Fresh ZIP installer | Passed offline hash verification and all 15 isolated smoke checks before activation |
+| Installed stable launcher | /healthz returned 4.14.0, database ok, Waitress, worker paused as configured on validation port 8783 |
+| Operator guide | 11-page PDF generated from updated Markdown |
+
+The deterministic tests use controlled OSV/CVE responses. Live OSV remains
+unverified in this cloud because its outbound proxy previously rejected that host.
+Real Ollama inference and Ubuntu service acceptance have not run here. Public
+feed connectivity was verified in 4.13; those historical observations below are
+not new 4.14 live acceptance results. Lockfiles do not verify deployment or reachability.
+
+## Previous release evidence
+
 # CyberLab 4.13.0 — local production validation
 
 Host: Debian GNU/Linux 13, Python 3.12.14, Waitress 3.0.2. Optional browser tooling:

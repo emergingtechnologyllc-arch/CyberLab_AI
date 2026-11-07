@@ -6,6 +6,7 @@ import datetime as dt
 import json
 import os
 import sqlite3
+from . import identity
 from .provenance import migrate
 import urllib.request
 from .behavior import inventory
@@ -73,10 +74,11 @@ def run(db_path, project, base, planner=propose):
     """Only approved inspect_route can execute; it returns existing route metadata."""
     initialize(db_path)
     routes = inventory(project,base)
+    project_id=identity.register(db_path,project)
     with sqlite3.connect(db_path) as db:
-        run_id = db.execute('INSERT INTO ai_behavior_runs(created,project,status,summary,project_root) VALUES(?,?,?,?,?)',
+        run_id = db.execute('INSERT INTO ai_behavior_runs(created,project,status,summary,project_root,project_id) VALUES(?,?,?,?,?,?)',
             (dt.datetime.now(dt.timezone.utc).isoformat(),os.path.basename(os.path.realpath(project)),
-             'running','',os.path.realpath(project))).lastrowid
+             'running','',os.path.realpath(project),project_id)).lastrowid
     reviewed = set()
     lookup = {r['route']:r for r in routes}
     record(db_path,run_id,'inventory',{'route_count':len(routes),'scope':'filename-only; no source read'})

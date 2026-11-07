@@ -1,3 +1,19 @@
+# 4.14.0 — Project identity, dependency evidence and a clearer daily workflow
+
+* Added persistent project UUIDs and root-scoped history/correlation across legacy modules.
+  Proven historical roots are migrated; name-only ownership is never guessed.
+* Added a project passport for declared purpose, owner, environment, sensitivity and
+  expected access. Declared notes do not authorize actions or establish controls.
+* Added a deterministic, evidence-linked daily briefing for a selected project,
+  including stale checks, unknown coverage, pending changes and linked KEV candidates.
+* Added npm lockfile v1/v2/v3 and shrinkwrap inventories, direct/transitive dependencies,
+  multiple versions, manifest consistency checks and explicit query coverage.
+  Up to 3,000 inventory occurrences and 1,000 queried unique package/version pairs;
+  lockfile evidence does not prove a deployed installation or reachable vulnerability.
+* Isolated individual CVE failures with backoff, quarantine after three failures,
+  manual retry, and incomplete-source indicators. Good records continue to import.
+* Updated the operator guide, browser checks, regression coverage and current ZIP.
+
 # 4.13.0 — Local production profile and current reference intelligence
 
 * Replaced the development HTTP transport with pinned, verified Waitress WSGI.

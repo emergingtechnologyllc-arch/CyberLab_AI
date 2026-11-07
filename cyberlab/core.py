@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import socket
 import sqlite3
+from . import identity
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -27,6 +28,7 @@ def init_db(path):
     with sqlite3.connect(path) as db:
         db.execute('CREATE TABLE IF NOT EXISTS runs (id INTEGER PRIMARY KEY, created TEXT, target TEXT, project TEXT, status TEXT, summary TEXT)')
         db.execute('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, run_id INTEGER, created TEXT, kind TEXT, payload TEXT)')
+        identity.migrate(db, 'runs')
 
 
 def event(path, rid, kind, payload):
@@ -119,9 +121,10 @@ def investigate(db_path, target, project, projects_dir):
         inspect_project(project, projects_dir)
     if not target and not project:
         raise ValueError('Provide a local target or approved local project')
+    project_id=identity.register(db_path,project) if project else ''
     with sqlite3.connect(db_path) as db:
-        cur = db.execute('INSERT INTO runs(created,target,project,status,summary) VALUES(?,?,?,?,?)',
-                         (now(), target or '', str(project or ''), 'running', ''))
+        cur = db.execute('INSERT INTO runs(created,target,project,status,summary,project_root,project_id) VALUES(?,?,?,?,?,?,?)',
+                         (now(), target or '', str(project or ''), 'running', '', str(Path(project).resolve()) if project else '', project_id))
         rid = cur.lastrowid
     observations = {'target':'local loopback target configured' if target else 'none', 'project':'approved local directory configured' if project else 'none'}
     history = []

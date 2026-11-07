@@ -90,6 +90,9 @@ def initialize(path):
         db.execute('''CREATE TABLE IF NOT EXISTS knowledge_cve_queue (
             external_id TEXT PRIMARY KEY, delta_updated TEXT NOT NULL,
             state TEXT NOT NULL DEFAULT 'pending')''')
+        columns={r[1] for r in db.execute('PRAGMA table_info(knowledge_cve_queue)')}
+        for name,definition in (('attempts','INTEGER NOT NULL DEFAULT 0'),('next_retry','REAL NOT NULL DEFAULT 0'),('last_error',"TEXT NOT NULL DEFAULT ''")):
+            if name not in columns: db.execute(f'ALTER TABLE knowledge_cve_queue ADD COLUMN {name} {definition}')
         db.execute('CREATE INDEX IF NOT EXISTS cve_queue_state ON knowledge_cve_queue(state,delta_updated)')
         db.execute('''CREATE TABLE IF NOT EXISTS knowledge_audit (
             id INTEGER PRIMARY KEY, created TEXT NOT NULL, source TEXT NOT NULL,
@@ -215,18 +218,22 @@ def load_source(path,source,headers,fetcher,deadline,stop):
         with sqlite3.connect(path,timeout=15) as db:
             for identifier,stamp in candidates.items():
                 db.execute('''INSERT INTO knowledge_cve_queue(external_id,delta_updated) VALUES(?,?)
-                    ON CONFLICT(external_id) DO UPDATE SET delta_updated=excluded.delta_updated,state='pending'
+                    ON CONFLICT(external_id) DO UPDATE SET delta_updated=excluded.delta_updated,state='pending',attempts=0,next_retry=0,last_error=''
                     WHERE excluded.delta_updated>knowledge_cve_queue.delta_updated''',(identifier,stamp))
-            count=db.execute("SELECT count(*) FROM knowledge_cve_queue WHERE state='pending'").fetchone()[0]
+            count=db.execute("SELECT count(*) FROM knowledge_cve_queue WHERE state IN ('pending','retry')").fetchone()[0]
             if count>10000: raise ValueError('CVE backlog budget exceeded')
-            pending=db.execute("SELECT external_id,delta_updated FROM knowledge_cve_queue WHERE state='pending' ORDER BY delta_updated DESC,external_id LIMIT ?",(MAX_CVE_FETCH,)).fetchall()
-        if data is None and not pending: return None,etag,revision,'',''
+            pending=db.execute("SELECT external_id,delta_updated FROM knowledge_cve_queue WHERE state='pending' OR (state='retry' AND next_retry<=?) ORDER BY CASE state WHEN 'pending' THEN 0 ELSE 1 END,delta_updated DESC,external_id LIMIT ?",(time.time(),MAX_CVE_FETCH)).fetchall()
         records=[]
         for identifier,stamp in pending:
             if stop and stop.is_set(): raise TimeoutError('Refresh stopped')
-            doc,_,_=fetcher(cve_url(identifier),{},256000,deadline,stop)
-            row=normalize_cve(doc,identifier,stamp)
-            records.append(row or dict(source='cve',external_id=identifier,rejected=True,delta_updated=stamp))
+            try:
+                doc,_,_=fetcher(cve_url(identifier),{},256000,deadline,stop)
+                row=normalize_cve(doc,identifier,stamp)
+                records.append(row or dict(source='cve',external_id=identifier,rejected=True,delta_updated=stamp))
+            except Exception as exc:
+                if stop and stop.is_set(): raise TimeoutError('Refresh stopped')
+                code='network_unavailable' if isinstance(exc,(OSError,TimeoutError,urllib.error.URLError)) else 'record_invalid'
+                records.append(dict(source='cve',external_id=identifier,delta_updated=stamp,failed=code))
         if revision=='not_modified': revision=hashlib.sha256(json.dumps(records,sort_keys=True).encode()).hexdigest()
         coverage=(f'Recent publisher windows only: {len(records)} queued records processed in this refresh; '
                   f'{max(0,count-len(records))} observed records still queued. '
@@ -234,6 +241,13 @@ def load_source(path,source,headers,fetcher,deadline,stop):
     keys=[r['external_id'] for r in records]
     if len(keys)!=len(set(keys)): raise ValueError('Duplicate source identifiers')
     return records,etag,revision,updated,coverage
+
+
+def retry_failed(path):
+    initialize(path)
+    with sqlite3.connect(path,timeout=15) as db:
+        db.execute("UPDATE knowledge_cve_queue SET state='pending',attempts=0,next_retry=0,last_error='' WHERE state IN ('retry','quarantined')")
+        db.execute("UPDATE knowledge_sources SET generation=generation+1,next_run=0 WHERE source='cve'")
 
 
 def configure(path,source,enabled,interval):
@@ -278,11 +292,18 @@ def refresh(path,source,manual=False,fetcher=fetch_json,stop=None):
             if source=='cve' and records is not None:
                 for item in records:
                     stamp=item.get('delta_updated') or item.get('metadata',{}).get('delta_updated')
-                    db.execute("UPDATE knowledge_cve_queue SET state='done' WHERE external_id=? AND delta_updated=?",(item['external_id'],stamp))
+                    if item.get('failed'):
+                        db.execute("""UPDATE knowledge_cve_queue SET attempts=attempts+1,
+                            state=CASE WHEN attempts>=2 THEN 'quarantined' ELSE 'retry' END,
+                            next_retry=?,last_error=? WHERE external_id=? AND delta_updated=?""",
+                            (time.time()+min(3600,300*2**min(3,db.execute('SELECT attempts FROM knowledge_cve_queue WHERE external_id=?',(item['external_id'],)).fetchone()[0])),item['failed'],item['external_id'],stamp))
+                        continue
+                    db.execute("UPDATE knowledge_cve_queue SET attempts=0,next_retry=0,last_error='',state='done' WHERE external_id=? AND delta_updated=?",(item['external_id'],stamp))
                 db.execute("DELETE FROM knowledge_cve_queue WHERE state='done' AND external_id NOT IN (SELECT external_id FROM knowledge_cve_queue ORDER BY delta_updated DESC LIMIT 10000)")
             if records is not None:
                 if source in ('kev','attack'): db.execute('DELETE FROM knowledge_records WHERE source=?',(source,))
                 for item in records:
+                    if item.get('failed'): continue
                     if item.get('rejected'):
                         db.execute('DELETE FROM knowledge_records WHERE source=? AND external_id=?',(source,item['external_id'])); continue
                     archive_record(db,item,checked)
@@ -291,6 +312,13 @@ def refresh(path,source,manual=False,fetcher=fetch_json,stop=None):
                         summary=excluded.summary,modified=excluded.modified,reference=excluded.reference,
                         metadata=excluded.metadata,fetched=excluded.fetched''',
                         (source,item['external_id'],item['kind'],item['title'],item['summary'],item['modified'],item['reference'],json.dumps(item['metadata']),checked))
+            if source=='cve':
+                outstanding=db.execute("SELECT count(*) FROM knowledge_cve_queue WHERE state IN ('retry','quarantined')").fetchone()[0]
+                if outstanding:
+                    state='partial'; error_code='cve_records_incomplete'
+                pending_count=db.execute("SELECT count(*) FROM knowledge_cve_queue WHERE state IN ('pending','retry')").fetchone()[0]
+                blocked=db.execute("SELECT count(*) FROM knowledge_cve_queue WHERE state='quarantined'").fetchone()[0]
+                coverage=f'Recent publisher windows only: {pending_count} queued; {blocked} quarantined. Individual failures retain prior good records. Not a historical CVE mirror; offline or polling gaps can miss deltas.'
             count=db.execute('SELECT count(*) FROM knowledge_records WHERE source=?',(source,)).fetchone()[0]
             db.execute('''UPDATE knowledge_sources SET succeeded=?,source_updated=?,etag=?,revision=?,coverage=? WHERE source=?''',
                        (checked,updated,etag,revision,coverage,source))
@@ -307,7 +335,8 @@ def status(path):
     with sqlite3.connect(path) as db:
         db.row_factory=sqlite3.Row
         rows=[dict(r) for r in db.execute('''SELECT s.*,(SELECT count(*) FROM knowledge_records r WHERE r.source=s.source) AS record_count,
-                CASE WHEN s.source='cve' THEN (SELECT count(*) FROM knowledge_cve_queue WHERE state='pending') ELSE 0 END AS pending_records
+                CASE WHEN s.source='cve' THEN (SELECT count(*) FROM knowledge_cve_queue WHERE state IN ('pending','retry')) ELSE 0 END AS pending_records,
+                CASE WHEN s.source='cve' THEN (SELECT count(*) FROM knowledge_cve_queue WHERE state='quarantined') ELSE 0 END AS blocked_records
                                           FROM knowledge_sources s ORDER BY s.source''')]
     for row in rows:
         row['name']=SOURCES[row['source']]['name']

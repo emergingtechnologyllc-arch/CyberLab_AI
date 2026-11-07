@@ -56,6 +56,18 @@ class DashboardTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.stop(); cls.log.close(); cls.tmp.cleanup()
 
+    def test_passport_requires_confirmation_and_escapes_declared_context(self):
+        values=dict(csrf=self.token,project='demo',owner='<script>alert(1)</script>',purpose='Test',
+                    environment='production',data_classification='internal',access_policy='Owner only')
+        self.assertEqual(self.request('/passport/save',values)[0],400)
+        values['authorized']='yes'
+        status,body=self.request('/passport/save',values)
+        self.assertEqual(status,200); self.assertIn('&lt;script&gt;',body)
+        self.assertNotIn('<script>alert(1)</script>',body)
+        status,body=self.request('/?project=demo')
+        self.assertEqual(status,200);self.assertIn('Your daily briefing',body)
+        self.assertIn('Coverage is unknown',body)
+
     def request(self,path='/',values=None,headers=None):
         body = urllib.parse.urlencode(values).encode() if values is not None else None
         req = urllib.request.Request(self.url+path,data=body,headers=headers or {})

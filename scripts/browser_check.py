@@ -84,11 +84,18 @@ def main():
                     form=page.locator('form[action="/monitor/configure"]')
                     form.locator('input[name="enabled"]').uncheck(); form.locator('input[name="authorized"]').check()
                     form.get_by_role('button',name='Save preferences').click()
-                    page.goto(address+'/')
+                    page.goto(address+'/passport?project=sample-workspace')
+                    page.get_by_label('Responsible person or team').fill('Local team')
+                    page.get_by_label('What does this application do?').fill('Synthetic demonstration')
+                    page.get_by_label('I approve saving this project context locally.').check()
+                    page.get_by_role('button',name='Save passport',exact=True).click()
+                    assert page.get_by_label('Responsible person or team').input_value()=='Local team'
+                    page.goto(address+'/?project=sample-workspace')
+                    assert page.get_by_role('heading',name='Your daily briefing').is_visible()
                     if args.screenshots: page.screenshot(path=str(args.screenshots/'overview-desktop.png'),full_page=True)
                     for width,height in [(1440,1000),(768,1024),(390,844)]:
                         page.set_viewport_size({'width':width,'height':height})
-                        for path in ['/','/projects','/investigations','/monitoring','/intelligence','/evidence','/verification','/settings','/help']:
+                        for path in ['/','/projects','/passport','/investigations','/monitoring','/intelligence','/evidence','/verification','/settings','/help']:
                             response=page.goto(address+path+'?project=sample-workspace')
                             assert response.status==200,(path,response.status)
                             assert not page.evaluate('document.documentElement.scrollWidth > innerWidth'),(width,path,'horizontal overflow')
@@ -96,7 +103,7 @@ def main():
                         page.goto(address+'/'); page.screenshot(path=str(args.screenshots/'overview-mobile.png'),full_page=True)
                     assert not errors,errors
                     browser.close()
-                print('PASS: browser project creation, investigation, change review, evidence, monitoring, and 27 responsive page checks')
+                print('PASS: browser project creation, investigation, change review, evidence, monitoring, and 30 responsive page checks')
             finally:
                 process.terminate(); process.wait(timeout=25)
 

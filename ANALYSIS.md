@@ -1,3 +1,17 @@
+# 4.14 implementation update
+
+Implemented the next practical slice: persistent project identity across legacy
+modules, root-safe correlation, project passports, deterministic daily briefings,
+npm lockfile inventories with multiple versions and coverage, and per-record CVE
+failure isolation. See CHANGELOG.md and TEST_RESULTS.md for scope and evidence.
+
+Future ideas from the creative roadmap remain future work: source AST inspection,
+case-file workflows, patch rehearsal and deployment-aware verification. The current
+route discovery is filename based. No self-training or unrestricted attack execution
+was added. Ollama remains an optional independently running local inference service.
+
+## Earlier analysis
+
 # Local production transition
 
 The previous unified interface ran on Python's development HTTP server and did

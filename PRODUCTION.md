@@ -1,6 +1,6 @@
 # Local production deployment
 
-CyberLab 4.13 uses Waitress 3.0.2 as a pinned, hash-verified WSGI transport. It is a
+CyberLab 4.14 uses Waitress 3.0.2 as a pinned, hash-verified WSGI transport. It is a
 single-user local application, not a publicly exposed multi-tenant service. See
 HOW_TO_USE.md for the complete plain-language operator walkthrough.
 
@@ -112,3 +112,17 @@ an integrity-checked pre-upgrade backup into a separate directory, then select i
 when launching preserved previous code. Do not overwrite a live database or expect
 a pre-upgrade backup to contain later evidence. Do not delete the previous install
 until data and application validation complete.
+
+
+## 4.14 upgrade notes
+
+Migrations add project identities, passport fields, component inventory/coverage,
+and CVE retry state. Existing records remain. Only explicitly stored canonical
+roots establish historical ownership; name-only rows are not reassigned. Preserve
+configured projects paths across upgrades. The release startup backs up the database
+before these migrations. The installer also creates a pre-install backup.
+
+The briefing compares both manifest and lockfile hashes. It does not label an old
+check current merely because the lockfile stayed unchanged. Declared passport data
+is kept local and does not authorize checks. Lockfile queries use npm package names
+and exact versions when available; registry credentials/URLs are not sent to OSV.

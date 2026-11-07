@@ -7,6 +7,7 @@ import datetime as dt
 import json
 from pathlib import Path
 import sqlite3
+from . import identity
 from .behavior import inventory
 
 MAX_FIXTURE = 32768
@@ -19,6 +20,7 @@ def initialize(db_path):
             (id INTEGER PRIMARY KEY, created TEXT, project TEXT, status TEXT, summary TEXT)''')
         db.execute('''CREATE TABLE IF NOT EXISTS experiment_events
             (id INTEGER PRIMARY KEY, run_id INTEGER, kind TEXT, payload TEXT)''')
+        identity.migrate(db, 'experiment_runs')
 
 
 def record(db_path, rid, kind, data):
@@ -74,9 +76,10 @@ def verify_case(case):
 def run(db_path, project, base):
     initialize(db_path)
     cases = validate_fixture(project,base)
+    project_id=identity.register(db_path,project)
     with sqlite3.connect(db_path) as db:
-        rid = db.execute('INSERT INTO experiment_runs(created,project,status,summary) VALUES(?,?,?,?)',
-                         (dt.datetime.now(dt.timezone.utc).isoformat(),Path(project).name,'running','')).lastrowid
+        rid = db.execute('INSERT INTO experiment_runs(created,project,status,summary,project_root,project_id) VALUES(?,?,?,?,?,?)',
+                         (dt.datetime.now(dt.timezone.utc).isoformat(),Path(project).name,'running','',str(Path(project).resolve()),project_id)).lastrowid
     record(db_path,rid,'experiment_scope',{'mode':'offline_synthetic_fixture','network_requests':0,'case_count':len(cases)})
     mismatches = 0
     for case in cases:

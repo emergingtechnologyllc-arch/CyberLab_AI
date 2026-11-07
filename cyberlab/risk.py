@@ -3,6 +3,8 @@ import datetime as dt
 import json
 import os
 import sqlite3
+from pathlib import Path
+from . import identity
 import urllib.request
 from collections import defaultdict
 from .memory import collect
@@ -18,18 +20,20 @@ def initialize(db_path):
             (run_id INTEGER, route TEXT, hypothesis_event INTEGER, observation_event INTEGER,
              relationship TEXT, indicator TEXT, recommendation TEXT,
              PRIMARY KEY(run_id,route,hypothesis_event,observation_event))""")
+        identity.migrate(db, 'risk_runs')
 
 
 def build_graph(records):
     """Link exact-route hypotheses to localhost observations, without asserting causality."""
     hypotheses=defaultdict(list); observations=defaultdict(list)
     for item in records:
-        if item['source']=='ai': hypotheses[item['route']].append(item)
-        elif item['source']=='live': observations[item['route']].append(item)
+        if item['source']=='ai': hypotheses[(item.get('project_id',''),item['route'])].append(item)
+        elif item['source']=='live': observations[(item.get('project_id',''),item['route'])].append(item)
     edges=[]
-    for route in sorted(hypotheses.keys() & observations.keys()):
-        for h in hypotheses[route][:3]:
-            for o in observations[route][:3]:
+    for key in sorted(hypotheses.keys() & observations.keys()):
+        route=key[1]
+        for h in hypotheses[key][:3]:
+            for o in observations[key][:3]:
                 mismatch=o['classification']=='observed_status_mismatch'
                 edges.append({'route':route,'hypothesis_event':h['event_id'],
                               'observation_event':o['event_id'],
@@ -63,9 +67,10 @@ def ai_triage(edges, transport=None):
     return {'summary':parsed['summary'][:500], 'next_step':parsed['next_step'][:500]}
 
 
-def analyze(db_path,project,use_ai=False,transport=None):
+def analyze(db_path,project,use_ai=False,transport=None,project_root=None):
     initialize(db_path)
-    records=collect(db_path,project)
+    records=collect(db_path,project,project_root)
+    project_id=identity.register(db_path,project_root) if project_root else ''
     edges=build_graph(records)
     now=dt.datetime.now(dt.timezone.utc).isoformat()
     count=sum(e['indicator']=='needs_manual_review' for e in edges)
@@ -81,8 +86,8 @@ def analyze(db_path,project,use_ai=False,transport=None):
         ai_status='no_relationships'
     with sqlite3.connect(db_path) as db:
         with db:
-            rid=db.execute('INSERT INTO risk_runs(created,project,status,summary,ai_status,ai_commentary) VALUES(?,?,?,?,?,?)',
-                           (now,project,'completed',summary,ai_status,commentary)).lastrowid
+            rid=db.execute('INSERT INTO risk_runs(created,project,status,summary,ai_status,ai_commentary,project_root,project_id) VALUES(?,?,?,?,?,?,?,?)',
+                           (now,project,'completed',summary,ai_status,commentary,str(Path(project_root).resolve()) if project_root else '',project_id)).lastrowid
             db.executemany('INSERT INTO risk_edges VALUES(?,?,?,?,?,?,?)',[(rid,e['route'],e['hypothesis_event'],
                  e['observation_event'],e['relationship'],e['indicator'],e['recommendation']) for e in edges])
     return rid

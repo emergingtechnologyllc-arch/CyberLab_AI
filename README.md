@@ -3,6 +3,9 @@
 One local security workspace for project investigations, current public threat
 references, monitoring, controlled verification, and evidence.
 
+**Current release: 4.14.0.** Project passports, evidence-linked daily briefings,
+lockfile dependency checks, and isolated CVE retries.
+
 **[How to Use — plain-language, step-by-step guide](HOW_TO_USE.md)** ·
 [Printable PDF guide](docs/CyberLab-How-To-Use.pdf) · [Production operations](PRODUCTION.md) · [Validation results](TEST_RESULTS.md)
 
@@ -62,6 +65,31 @@ commands. Login/logout persistence depends on the host's user-manager settings.
 Unit syntax was verified in the cloud; real Ubuntu service operation is a separate
 acceptance check.
 
+## What is new in 4.14
+
+Choose an active project, then open **Project passport** to describe its owner,
+purpose, environment, sensitivity and expected access. These are human declarations.
+**Overview** shows a daily briefing from saved evidence with links to the underlying
+checks. Unknown or stale coverage is shown explicitly. Opening the briefing does
+not run a scan, and a zero-match check is not a clean bill of health.
+
+**Intelligence → Check project advisories** prefers `npm-shrinkwrap.json`, then
+`package-lock.json` (versions 1–3). Multiple versions and transitive packages remain
+separate. Check details display queried/total component counts and consistency notes.
+Up to 3,000 lock entries are inventoried; a check queries at most 1,000 unique pairs,
+in direct-first order. The first 100 components are shown in the detail page.
+The deployed installation, source reachability and actual exploitability remain unverified.
+
+Each project has an identity bound to its canonical folder. Preserve your configured
+project path during upgrades. Moving or renaming a folder creates another identity;
+name-only legacy records stay visible in all-workspace history but are excluded from
+project correlations. Historical records with explicit roots are migrated safely.
+
+A failed CVE download now retries after 5 and 10 minutes, then is quarantined after
+three failures. Other records continue. **Retry failed CVE records** resets failed
+records; a newer publisher revision also reopens a quarantined record. Incomplete
+feeds are labeled explicitly. This remains a recent-window cache, not a full CVE mirror.
+
 ## What “learning” means
 
 CyberLab maintains a timestamped, searchable local reference library:
@@ -70,7 +98,7 @@ CyberLab maintains a timestamped, searchable local reference library:
 - **CVE Program**: recent publisher delta windows, checked every five minutes;
   observed records are queued and processed in bounded batches.
 - **MITRE ATT&CK**: the enterprise technique catalog, refreshed daily.
-- **OSV**: explicit project dependency checks using declared npm package metadata.
+- **OSV**: explicit project checks of npm lockfile versions, with a manifest fallback.
 
 Sources have saved refresh preferences, cached records, source/fetch dates,
 content revisions, failure states and a bounded audit history. Good cached data
@@ -101,7 +129,7 @@ implemented in this release. See THIRD_PARTY.md for publisher attribution and te
 Choose a project in the top bar and retain that context as you navigate. Samples
 are optional and clearly synthetic; production installation does not create fake
 projects, evidence or findings. Current route tools support Next.js filenames and
-package checking supports npm manifests; this is not a universal source-code scanner.
+package checking supports npm manifests and lockfile versions 1–3; this is not a universal source-code scanner.
 
 ## Operational controls
 

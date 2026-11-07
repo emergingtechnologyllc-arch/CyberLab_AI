@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+from . import identity, dependencies
 import urllib.request
 import time
 
@@ -31,6 +32,14 @@ def initialize(db_path):
         if 'project_root' not in {r[1] for r in db.execute('PRAGMA table_info(intelligence_checks)')}:
             db.execute("ALTER TABLE intelligence_checks ADD COLUMN project_root TEXT NOT NULL DEFAULT ''")
         db.execute('CREATE INDEX IF NOT EXISTS intelligence_root ON intelligence_checks(project_root,id)')
+        identity.migrate(db, 'intelligence_checks')
+        columns={r[1] for r in db.execute('PRAGMA table_info(intelligence_checks)')}
+        for name in ('coverage','snapshot_hash'):
+            if name not in columns: db.execute(f"ALTER TABLE intelligence_checks ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
+        db.execute('''CREATE TABLE IF NOT EXISTS intelligence_components (
+            check_id INTEGER NOT NULL,name TEXT NOT NULL,version TEXT NOT NULL,provenance TEXT NOT NULL,
+            direct INTEGER NOT NULL,locations_count INTEGER NOT NULL,queried INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY(check_id,name,version))''')
 
 
 def utcnow():
@@ -115,42 +124,89 @@ def osv_details(ids, opener=None):
     return details
 
 
-def check_project(db_path, project, projects_base, query=osv_batch_query, details_fetch=osv_details):
-    name, packages = project_manifest(project, projects_base)
-    initialize(db_path)
-    with sqlite3.connect(db_path, timeout=15) as db:
-        cur = db.execute('INSERT INTO intelligence_checks(created,project,status,package_count,match_count,error,project_root) VALUES(?,?,?,?,?,?,?)',
-                         (utcnow(), name, 'running', len(packages), 0, '', str(Path(project).resolve())))
-        check_id = cur.lastrowid
+def osv_component_query(components,deadline=None,opener=None):
+    deadline=deadline or time.monotonic()+40
+    opener=opener or urllib.request.urlopen
+    results=[]
+    for offset in range(0,len(components),75):
+        remaining=deadline-time.monotonic()
+        if remaining<=0: raise TimeoutError('Dependency query budget exhausted')
+        batch=components[offset:offset+75]; queries=[]
+        for component in batch:
+            item={'package':{'name':component['name'],'ecosystem':'npm'}}
+            if dependencies.VERSION.fullmatch(component['version']): item['version']=component['version']
+            queries.append(item)
+        request=urllib.request.Request(OSV_URL,data=json.dumps({'queries':queries}).encode(),
+            headers={'Content-Type':'application/json','User-Agent':f'CyberLab/{__version__}'},method='POST')
+        with opener(request,timeout=min(10,remaining)) as response: raw=response.read(MAX_RESPONSE+1)
+        if len(raw)>MAX_RESPONSE: raise ValueError('OSV response exceeds budget')
+        data=json.loads(raw)
+        items=data.get('results')
+        if not isinstance(items,list) or len(items)!=len(batch) or any(not isinstance(r,dict) for r in items):
+            raise ValueError('Unexpected OSV component response')
+        results.extend(items)
+    return results
+
+
+def check_project(db_path, project, projects_base, query=None, details_fetch=osv_details, component_query=None):
+    snapshot=dependencies.inventory(project,projects_base)
+    name=snapshot['project']; initialize(db_path)
+    project_id=identity.register(db_path,project)
+    # Preserve all inventory components; query a bounded direct-first subset explicitly.
+    components=sorted(snapshot['components'],key=lambda c:(not c['direct'],c['name'],c['version']))
+    selected=components[:1000]
+    coverage=json.dumps(dict(lockfile=snapshot['lockfile'],consistency_verified=snapshot['consistency_verified'],
+        inventory_components=len(components),query_limit=1000,queried_components=0,
+        notes=snapshot['coverage_notes'],limitation=snapshot['limitation']))
+    with sqlite3.connect(db_path,timeout=15) as db:
+        check_id=db.execute('''INSERT INTO intelligence_checks
+            (created,project,status,package_count,match_count,error,project_root,project_id,coverage,snapshot_hash)
+            VALUES(?,?,'running',?,0,'',?,?,?,?)''',
+            (utcnow(),name,len(components),str(Path(project).resolve()),project_id,coverage,dependencies.fingerprint(snapshot))).lastrowid
+        db.executemany('INSERT INTO intelligence_components(check_id,name,version,provenance,direct,locations_count) VALUES(?,?,?,?,?,?)',
+            [(check_id,c['name'],c['version'],c['provenance'],int(c['direct']),c['locations_count']) for c in components])
     try:
-        results = query(packages)
-        ids = [v.get('id') for r in results for v in r.get('vulns', []) if isinstance(v, dict) and isinstance(v.get('id'), str)]
-        details = details_fetch(ids)
-        matches = []
-        for (pkg, spec), result in zip(packages.items(), results):
-            for vuln in result.get('vulns', [])[:100]:
-                vid = vuln.get('id')
-                if not isinstance(vid, str):
-                    continue
-                if exact_version(spec):
-                    assessment = 'potential_version_match'
-                    reason = 'OSV returned this advisory for the declared exact version; verify installed lockfile and affected configuration'
+        if component_query is not None: results=component_query(selected)
+        elif query is not None:
+            # Compatibility hook for older custom transports; exact multi-version adapters use component_query.
+            if len({c['name'] for c in selected})!=len(selected): raise ValueError('Use component_query for multiple versions of the same package')
+            results=query({c['name']:c['version'] for c in selected})
+        else: results=osv_component_query(selected)
+        if not isinstance(results,list) or len(results)!=len(selected) or any(not isinstance(r,dict) for r in results):
+            raise ValueError('Unexpected advisory response count')
+        ids=[v.get('id') for r in results for v in r.get('vulns',[])[:100] if isinstance(v,dict) and isinstance(v.get('id'),str)]
+        details=details_fetch(ids)
+        matches=[]
+        for component,result in zip(selected,results):
+            for vuln in result.get('vulns',[])[:100]:
+                if not isinstance(vuln,dict): continue
+                vid=vuln.get('id')
+                if not isinstance(vid,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{3,100}',vid): continue
+                if component['provenance']=='lockfile_resolved':
+                    assessment='potential_lockfile_version_match'
+                    reason='OSV candidate for a lockfile-resolved version; deployed installation and reachability are not verified'
+                    if not snapshot['consistency_verified']: reason+='; manifest/lock consistency is incomplete'
+                elif dependencies.VERSION.fullmatch(component['version']):
+                    assessment='potential_version_match'; reason='Declared exact version only; no deployed installation evidence'
                 else:
-                    assessment = 'version_unresolved'
-                    reason = 'Manifest specifies a range or non-exact version; installed version and applicability not established'
-                matches.append((check_id, pkg, spec, vid, assessment, reason))
-        with sqlite3.connect(db_path, timeout=15) as db:
-            for vid, item in details.items():
-                references = item.get('references') or []
-                reference = next((r.get('url') for r in references if isinstance(r, dict) and isinstance(r.get('url'), str) and r['url'].startswith('https://')), 'https://osv.dev/vulnerability/' + vid)
+                    assessment='version_unresolved'; reason='Manifest range or unsupported version; installed applicability is unresolved'
+                matches.append((check_id,component['name'],component['version'],vid,assessment,reason))
+        info=json.loads(coverage); info['queried_components']=len(selected)
+        with sqlite3.connect(db_path,timeout=15) as db:
+            for vid,item in details.items():
+                if item.get('id')!=vid: continue
+                # Canonical OSV reference, never a fetch URL taken from feed content.
+                reference='https://osv.dev/vulnerability/'+vid
                 db.execute('INSERT OR REPLACE INTO advisories VALUES(?,?,?,?,?,?,?)',
-                    (vid, str(item.get('modified',''))[:80], str(item.get('summary',''))[:2000],
-                     json.dumps(item.get('aliases',[])[:20]), reference[:500], json.dumps(item)[:50000], utcnow()))
-            db.executemany('INSERT INTO intelligence_matches VALUES(?,?,?,?,?,?)', matches)
-            db.execute('UPDATE intelligence_checks SET status=?,match_count=? WHERE id=?', ('completed', len(matches), check_id))
+                    (vid,str(item.get('modified',''))[:80],str(item.get('summary',''))[:2000],
+                     json.dumps(item.get('aliases',[])[:20]),reference,json.dumps(item)[:50000],utcnow()))
+            db.executemany('INSERT INTO intelligence_matches VALUES(?,?,?,?,?,?)',matches)
+            db.executemany('UPDATE intelligence_components SET queried=1 WHERE check_id=? AND name=? AND version=?',
+                           [(check_id,c['name'],c['version']) for c in selected])
+            db.execute("UPDATE intelligence_checks SET status='completed',match_count=?,coverage=? WHERE id=?",(len(matches),json.dumps(info),check_id))
     except Exception as exc:
-        with sqlite3.connect(db_path, timeout=15) as db:
-            db.execute('UPDATE intelligence_checks SET status=?,error=? WHERE id=?', ('error', f'{type(exc).__name__}: {exc}'[:300], check_id))
+        with sqlite3.connect(db_path,timeout=15) as db:
+            db.execute("UPDATE intelligence_checks SET status='error',error=? WHERE id=?",(type(exc).__name__+': advisory operation failed; no complete query coverage is claimed',check_id))
     return check_id
 
 

@@ -5,9 +5,9 @@ import os
 from pathlib import Path
 import sqlite3
 from urllib.parse import urlencode
-from . import __version__, projects as project_store
+from . import __version__, projects as project_store, identity
 
-NAV = (('/', 'Overview', 'overview'), ('/projects','Projects','folder'),
+NAV = (('/', 'Overview', 'overview'), ('/projects','Projects','folder'), ('/passport','Project passport','book'),
        ('/investigations','Investigations','search'), ('/monitoring','Monitoring','pulse'),
        ('/intelligence','Intelligence','globe'), ('/evidence','Evidence','layers'),
        ('/verification','Verification','check'),('/help','How to Use','book'))
@@ -42,7 +42,7 @@ LABELS = {'baseline':'Baseline established','unchanged':'No changes','changed':'
           'model_unavailable':'Model unavailable','model_invalid':'Invalid model response',
           'analysis_failed':'Analysis failed','analyzing':'Analyzing', 'completed':'Completed',
           'running':'Running','error':'Needs attention','pending':'Waiting for first check',
-          'assessment_failed':'Assessment failed'}
+          'assessment_failed':'Assessment failed','partial':'Incomplete refresh'}
 
 
 def esc(value): return html.escape(str(value), quote=True)
@@ -62,7 +62,7 @@ def button(label, path, project='', primary=False, symbol=None):
 
 
 def badge(status):
-    color = 'green' if status in ('completed','unchanged','baseline','enabled') else 'amber' if status in ('changed','recommended_review','pending_analysis','running','analyzing') else 'red' if status in ('error','model_invalid','analysis_failed','assessment_failed') else ''
+    color = 'green' if status in ('completed','unchanged','baseline','enabled') else 'amber' if status in ('changed','recommended_review','pending_analysis','running','analyzing','partial') else 'red' if status in ('error','model_invalid','analysis_failed','assessment_failed') else ''
     return f'<span class="badge {color}">{esc(LABELS.get(status,status.replace("_"," ").capitalize()))}</span>'
 
 
@@ -107,13 +107,17 @@ def option(name, value, title, description, checked=False):
 
 def records(db_path, project='', limit=20, base=None):
     result = []
+    project_id=''
+    if project:
+        identity.initialize(db_path,str(Path(base)/project))
+        project_id=identity.register(db_path,Path(base)/project)
     with sqlite3.connect(db_path) as db:
         db.row_factory = sqlite3.Row
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         for table,title,prefix in SOURCES:
             if table not in tables: continue
-            params = (project, str(Path(base)/project),limit) if project else (limit,)
-            where = ' WHERE (project=? OR project=?)' if project else ''
+            params = (project_id,limit) if project else (limit,)
+            where = ' WHERE project_id=?' if project else ''
             rows = db.execute(f'SELECT id,created,project,status FROM {table}{where} ORDER BY id DESC LIMIT ?',params)
             for row in rows:
                 item = dict(row); item.update(title=title,href=url(prefix+str(row['id']),project))
@@ -170,11 +174,12 @@ def workspace(db_path, base, token, path, query):
     if not project and 'project' not in query and path not in ('/', '/projects', '/settings', '/help') and names:
         project = names[0]
     rows = records(db_path,project,base=base)
+    project_id=identity.register(db_path,Path(base)/project) if project else ''
     with sqlite3.connect(db_path) as db:
         db.row_factory = sqlite3.Row
         settings = [dict(r) for r in db.execute('SELECT * FROM monitor_settings ORDER BY project_root')]
         change_rows = [dict(r) for r in db.execute('''SELECT c.id,c.status,r.project FROM change_investigations c
-            JOIN continuous_runs r ON r.id=c.assessment_id WHERE (?='' OR r.project=?) ORDER BY c.id DESC LIMIT 30''',(project,project))]
+            JOIN continuous_runs r ON r.id=c.assessment_id WHERE (?='' OR r.project_id=?) ORDER BY c.id DESC LIMIT 30''',(project,project_id))]
     selected_settings = next((s for s in settings if s['project_root'] == str(Path(base)/project)),{})
     active_settings = [s for s in settings if not project or s['project_root'] == str(Path(base)/project)]
     notices = {'created':'Project created. Your workspace is ready for its first investigation.',
@@ -189,12 +194,12 @@ def workspace(db_path, base, token, path, query):
             button('Add project','/projects',symbol='plus')+button('New investigation','/investigations',project,True,'search'),scope)
         with sqlite3.connect(db_path) as db:
             pending = db.execute('''SELECT count(*) FROM change_investigations c
-                JOIN continuous_runs r ON r.id=c.assessment_id WHERE (?='' OR r.project=?)
-                AND c.status IN ('pending_analysis','recommended_review','model_invalid','analysis_failed','model_unavailable')''', (project,project)).fetchone()[0]
+                JOIN continuous_runs r ON r.id=c.assessment_id WHERE (?='' OR r.project_id=?)
+                AND c.status IN ('pending_analysis','recommended_review','model_invalid','analysis_failed','model_unavailable')''', (project,project_id)).fetchone()[0]
         evidence_count = 0
         with sqlite3.connect(db_path) as db:
             for table in ('live_runs','experiment_runs','memory_snapshots'):
-                evidence_count += db.execute(f'SELECT count(*) FROM {table}'+(' WHERE project=?' if project else ''),(project,) if project else ()).fetchone()[0]
+                evidence_count += db.execute(f'SELECT count(*) FROM {table}'+(' WHERE project_id=?' if project else ''),(project_id,) if project else ()).fetchone()[0]
         metrics = ((len(names),'Projects','folder','Available in your local workspace'),
                    (pending,'Changes to review','pulse','Pending analysis or manual review'),
                    (sum(s['enabled'] for s in active_settings),'Active monitors','clock','Runs while CyberLab is open'),
@@ -203,13 +208,16 @@ def workspace(db_path, base, token, path, query):
         from . import knowledge
         library=knowledge.status(db_path)
         total=sum(s['record_count'] for s in library)
-        waiting=sum(s['stale'] or s['state']=='error' for s in library)
+        waiting=sum(s['stale'] or s['state'] in ('error','partial') for s in library)
         body+=f'<div class="info-box">{icon("globe")} Intelligence library: <strong>{total:,} references</strong> · {waiting} sources need a fresh check. <a href="/intelligence">Review sources →</a></div>'
+        body += daily_briefing(db_path,base,project)
         project_content = ''.join(f'<div class="project-card"><div class="project-symbol">{icon("folder")}</div><div class="project-info"><h3>{esc(n)}</h3><p>Local project · Ready to investigate</p></div>{button("Open workspace","/investigations",n,symbol="arrow")}</div>' for n in names[:4])
         if not project_content:
             project_content = empty('Connect your first project','Bring a local project into focus, or try a sample to explore the workflow.',button('Add a project','/projects',primary=True,symbol='plus'))
         body += f'<div class="overview-grid"><div class="stack"><section class="panel"><div class="panel-head"><h2>Your projects <span class="count">{len(names)}</span></h2><a class="text-link" href="/projects">View all {icon("arrow")}</a></div>{project_content}</section>'
         body += f'<section class="panel"><div class="panel-head"><div class="activity-head"><h2>Recent activity</h2><span class="count">{len(rows)}</span></div><a class="text-link" href="{esc(url("/evidence",project))}">View history {icon("arrow")}</a></div>{activity_table(rows[:5])}</section></div>{guide()}</div>'
+    elif path == '/passport':
+        body=passport_panel(db_path,base,project,token)
     elif path == '/projects':
         body = heading('Your projects','One place for the projects you own and the evidence you collect.',eyebrow='Workspace / Projects')
         cards = ''.join(f'<div class="project-card"><div class="project-symbol">{icon("folder")}</div><div class="project-info"><h3>{esc(n)}</h3><p>Local project folder</p></div>{button("Open workspace","/investigations",n,True,"arrow")}</div>' for n in names)
@@ -245,7 +253,7 @@ def workspace(db_path, base, token, path, query):
         body = heading('Current intelligence. Clear provenance.','Refresh vulnerability and attack references, then check whether a project needs review.',eyebrow=scope)
         body += knowledge_view(db_path,token,project,query)
         body += '<div class="form-layout" style="margin-top:24px"><section class="panel"><h2>Check project advisories</h2>'+need_project(project)+form_open('/intelligence/check',token,project,'/intelligence')
-        body += '<p class="muted fine">CyberLab reads your package manifest and queries OSV for candidate advisory matches. A match needs review before it becomes a finding.</p>'+consent('I authorize reading this project’s dependency manifest and sending package names to OSV.')+'<button class="primary">Check advisories '+icon('arrow')+'</button></form></section><aside class="panel"><h2>What leaves your machine?</h2><p class="muted fine">Dependency names and declared versions go to api.osv.dev. Source files and credentials are excluded.</p></aside></div>'
+        body += '<p class="muted fine">CyberLab inventories npm lockfile versions, including transitive packages, and queries OSV. Without a lockfile it uses the manifest and reports uncertainty. Read queried/total coverage before reviewing candidates.</p>'+consent('I authorize reading this project’s dependency manifest and lockfile, and sending package names and available exact versions to OSV.')+'<button class="primary">Check advisories '+icon('arrow')+'</button></form></section><aside class="panel"><h2>What leaves your machine?</h2><p class="muted fine">Dependency names and available exact versions go to api.osv.dev. Source files and credentials are excluded.</p></aside></div>'
         body += '<section style="margin-top:24px"><h2>Advisory history</h2>'+activity_table([r for r in rows if r['title']=='Advisory check'])+'</section>'
     elif path == '/evidence':
         body = heading('Every observation has a source.','Review results, connect related evidence, and keep hypotheses separate from observations.',eyebrow=scope)
@@ -327,10 +335,13 @@ def knowledge_view(db_path,token,project,query):
     body+='<div class="source-grid">'
     for row in sources:
         body+='<div class="source-card"><h3>'+esc(row['name'])+'</h3>'
-        state='Stale / never refreshed' if row['stale'] else 'Fresh cache'
-        body+=f'<p>{badge(row["state"])} <span class="badge {"amber" if row["stale"] else "green"}">{state}</span></p><p class="fine">{row["record_count"]:,} saved records</p>'
+        state='Incomplete cache' if row['state']=='partial' else 'Stale / never refreshed' if row['stale'] else 'Fresh cache'
+        body+=f'<p>{badge(row["state"])} <span class="badge {"amber" if row["stale"] or row["state"]=="partial" else "green"}">{state}</span></p><p class="fine">{row["record_count"]:,} saved records</p>'
         body+=f'<p class="help">Last successful refresh (UTC): {esc(row["succeeded"] or "Never")}<br>Publisher update (UTC): {esc(row["source_updated"] or "Unknown")}</p>'
         if row['error_code']: body+='<p class="help">Last attempt: '+esc(row['error_code'])+'. Previous good records are retained.</p>'
+        if row['source']=='cve':
+            body+=f'<p class="help">{row["pending_records"]} queued · {row["blocked_records"]} quarantined after three failed attempts.</p>'
+            body+=form_open('/knowledge/retry',token,project)+consent('I approve retrying failed public CVE downloads.')+'<button>Retry failed CVE records</button></form>'
         if row['coverage']: body+='<p class="help">'+esc(row['coverage'])+'</p>'
         body+=form_open('/knowledge/refresh',token,project)+f'<input type="hidden" name="source" value="{row["source"]}">'+consent('I approve downloading this public reference feed.')+'<button>Refresh this source</button></form>'
         body+='<details><summary>Automatic refresh preferences</summary>'+form_open('/knowledge/configure',token,project)+f'<input type="hidden" name="source" value="{row["source"]}">'
@@ -373,3 +384,53 @@ def knowledge_detail(record):
     else: meaning='A vulnerability has been publicly disclosed. A disclosure alone does not establish that your project contains or exposes it.'
     body+='<p class="fine">'+meaning+'</p>'+f'<dl class="settings-list"><div><dt>Source modified (UTC)</dt><dd>{esc(record["modified"])}</dd></div><div><dt>Saved locally (UTC)</dt><dd>{esc(record["fetched"])}</dd></div></dl><p class="help">'+esc(metadata.get('applicability','Project applicability is not established.'))+'</p><p class="help">Saved reference revision (SHA-256):</p><code>'+esc(record.get('revision',''))+'</code></aside></div>'
     return body
+
+
+def daily_briefing(db_path,base,project):
+    if not project:
+        return '<section class="panel"><h2>Your daily briefing</h2><p class="muted">Choose an active project above to see its evidence, dependency coverage, and next steps.</p></section>'
+    from . import briefing
+    report=briefing.build(db_path,Path(base)/project,base)
+    body='<section class="panel"><p class="eyebrow">Project focus</p><h2>Your daily briefing</h2>'
+    for item in report['items']:
+        href=item['href'] if item['href'].split('?')[0] not in ('/intelligence',) else url(item['href'],project)
+        body+=f'<div class="event"><h3>{esc(item["title"])}</h3><p>{esc(item["detail"])}</p><a class="text-link" href="{esc(href)}">Review evidence →</a></div>'
+    return body+f'<p class="help">{esc(report["limitation"])}</p></section>'
+
+
+def passport_panel(db_path,base,project,token):
+    body=heading('Know what you are protecting.','A project identity, declared context, and dependency coverage in one place.',eyebrow='Project passport')
+    if not project: return body+need_project(project)
+    facts=identity.passport(db_path,Path(base)/project)
+    body+='<div class="form-layout"><section class="panel"><h2>Project identity</h2>'
+    body+=f'<p><strong>{esc(project)}</strong></p><p class="help">Persistent ID: <code>{esc(facts["id"])}</code></p><p class="help">Root: <code>{esc(facts["root"])}</code></p>'
+    body+='<p class="help">Identity is tied to this canonical folder. Moving or renaming it creates a separate identity. Old name-only evidence remains in workspace history but is excluded from project correlations.</p>'
+    from . import dependencies
+    try:
+        inv=dependencies.inventory(Path(base)/project,base)
+        body+=f'<h3>Dependency evidence</h3><p>{len(inv["components"])} unique package/version pairs · {esc(inv["lockfile"] or "Manifest only")}</p><p>Manifest consistency: {"verified" if inv["consistency_verified"] else "incomplete"}</p>'
+        body+='<p class="help">'+esc(inv['limitation'])+'</p>'
+        body+=''.join('<p class="help">'+esc(note)+'</p>' for note in inv['coverage_notes'])
+    except (ValueError,OSError) as exc:
+        body+='<p class="help">Dependency inventory unavailable: '+esc(str(exc))+'</p>'
+    body+='</section><section class="panel"><h2>Describe your project</h2><p class="help">Human-declared context. These notes do not grant permission or verify access controls. Do not enter secrets.</p>'+form_open('/passport/save',token,project,'/passport')
+    for key,label,maximum in (('owner','Responsible person or team',120),('purpose','What does this application do?',800),('access_policy','Who should access what?',1200)):
+        body+=f'<label class="form-label" for="passport-{key}">{label}</label><textarea class="field" id="passport-{key}" name="{key}" maxlength="{maximum}">{esc(facts[key])}</textarea>'
+    for key,label,values in (('environment','Environment',('unspecified','development','staging','production')),('data_classification','Data sensitivity',('unspecified','public','internal','sensitive'))):
+        body+=f'<label class="form-label" for="passport-{key}">{label}</label><select class="field" id="passport-{key}" name="{key}">'
+        body+=''.join(f'<option value="{value}" {"selected" if facts[key]==value else ""}>{value.capitalize()}</option>' for value in values)+'</select>'
+    return body+consent('I approve saving this project context locally.')+'<button class="primary">Save passport</button></form></section></div>'
+
+
+def component_coverage(db_path,check):
+    try: info=json.loads(check.get('coverage') or '{}')
+    except ValueError: info={}
+    body='<section><h2>Dependency coverage</h2>'
+    if not info: return body+'<p>Legacy check: component coverage was not captured. Run a new check.</p></section>'
+    body+=f'<p>{esc(info.get("queried_components",0))} / {esc(info.get("inventory_components",0))} unique package/version pairs queried. Lockfile: {esc(info.get("lockfile") or "none")}.</p><p>Manifest consistency: {"verified" if info.get("consistency_verified") else "incomplete"}</p><p class="help">{esc(info.get("limitation",""))}</p>'
+    body+=''.join('<p class="help">'+esc(note)+'</p>' for note in info.get('notes',[]))
+    with sqlite3.connect(db_path) as db:
+        rows=db.execute('SELECT name,version,provenance,queried FROM intelligence_components WHERE check_id=? ORDER BY direct DESC,name,version LIMIT 100',(check['id'],)).fetchall()
+    body+='<details><summary>Component inventory (first 100)</summary><div class="table-wrap"><table><thead><tr><th>Package</th><th>Version</th><th>Evidence</th><th>Queried</th></tr></thead><tbody>'
+    body+=''.join('<tr>'+''.join('<td>'+esc(value)+'</td>' for value in (*row[:3],'Yes' if row[3] else 'No'))+'</tr>' for row in rows)
+    return body+'</tbody></table></div></details></section>'

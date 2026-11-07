@@ -32,9 +32,10 @@ class WorkspaceTests(unittest.TestCase):
     def test_history_filter_treats_project_names_literally(self):
         with tempfile.TemporaryDirectory() as tmp:
             base=Path(tmp); db=str(base/'test.db'); init_db(db)
+            (base/'team_one').mkdir(); (base/'teamXone').mkdir()
             with sqlite3.connect(db) as conn:
                 for project in ['team_one','teamXone',str(base/'team_one')]:
-                    conn.execute("INSERT INTO runs(created,project,status) VALUES('2026',?,'completed')",(project,))
+                    conn.execute("INSERT INTO runs(created,project,status,project_root) VALUES('2026',?,'completed',?)",(project,str(base/('teamXone' if project=='teamXone' else 'team_one'))))
             result=ui.records(db,'team_one',base=base)
             self.assertEqual(len(result),2)
             self.assertNotIn('teamXone',[r['project'] for r in result])

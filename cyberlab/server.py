@@ -10,7 +10,7 @@ import logging
 from email.message import Message
 from http import HTTPStatus
 from types import SimpleNamespace
-from . import knowledge, jobs, runtime
+from . import knowledge, jobs, runtime, identity
 from urllib.parse import parse_qs, urlsplit, urlencode
 from . import change_investigation as changes, monitor, ui, projects as project_store, __version__
 from .continuous import initialize as init_continuous, assess as continuous_assess, recent as continuous_recent, detail as continuous_detail
@@ -38,6 +38,7 @@ def initialize():
     for fn in (init_db,init_intel,init_behavior,init_ai_behavior,init_experiments,init_live,
                init_memory,init_risk,init_continuous,monitor.initialize,knowledge.initialize):
         fn(DB)
+    identity.initialize(DB)
     runtime.prepare_database(DB,__version__)
 
 
@@ -95,7 +96,7 @@ class Handler:
         return ui.layout(content,title,active,project,project_store.discover(PROJECTS))
 
     def redirect(self, destination, project='', notice=''):
-        if destination not in ('/', '/projects','/investigations','/monitoring','/intelligence','/evidence','/verification','/intelligence'):
+        if destination not in ('/', '/projects','/investigations','/monitoring','/intelligence','/evidence','/verification','/intelligence','/passport'):
             destination = '/'
         location = ui.url(destination,project,**({'notice':notice} if notice else {}))
         self.send_response(303); self.send_header('Location',location); self.end_headers()
@@ -159,7 +160,7 @@ class Handler:
             self.send_header('Content-Length',str(len(body)))
             self.send_header('X-Content-Type-Options','nosniff')
             self.end_headers(); self.wfile.write(body); return
-        if p in ('/', '/projects', '/investigations', '/monitoring', '/intelligence', '/evidence', '/verification', '/settings', '/help'):
+        if p in ('/', '/projects', '/investigations', '/monitoring', '/intelligence', '/evidence', '/verification', '/settings', '/help', '/passport'):
             try:
                 query = parse_qs(urlsplit(self.path).query, keep_blank_values=True, max_num_fields=10)
                 self.send_html(ui.workspace(DB,PROJECTS,TOKEN,p,query))
@@ -242,7 +243,7 @@ class Handler:
                 return
             check, matches = result
             rows = ''.join('<div class="event"><strong>'+esc(m['package'])+' '+esc(m['declared'])+'</strong> · '+esc(m['advisory_id'])+'<p>'+esc(m['assessment'])+(' · CISA KEV reference linked' if m.get('known_exploited_reference') else '')+' — '+esc(m['reason'])+'</p><p>'+esc(m['summary'] or 'Advisory details unavailable')+'</p><p>'+esc(m['reference'] or 'https://osv.dev')+'</p></div>' for m in matches)
-            self.send_html(self.render_page(f'<p><a href="/">← Dashboard</a> · <a href="{esc(p)}">Refresh</a></p><section><h2>Advisory check #{check["id"]}: {esc(check["status"])}</h2><p>Project: {esc(check["project"])} · Dependencies: {check["package_count"]} · Candidate matches: {check["match_count"]}</p><p>{esc(check["error"])}</p><p class="muted">Advisories are untrusted external information; a candidate match is not proof of exploitability.</p></section><section><h2>Candidate advisories</h2>{rows or "No matches yet; refresh if the check is running."}</section>'))
+            self.send_html(self.render_page(f'<p><a href="/">← Dashboard</a> · <a href="{esc(p)}">Refresh</a></p><section><h2>Advisory check #{check["id"]}: {esc(check["status"])}</h2><p>Project: {esc(check["project"])} · Dependencies: {check["package_count"]} · Candidate matches: {check["match_count"]}</p><p>{esc(check["error"])}</p><p class="muted">Advisories are untrusted external information; a candidate match is not proof of exploitability.</p></section>{ui.component_coverage(DB,check)}<section><h2>Candidate advisories</h2>{rows or "No matches yet; refresh if the check is running."}</section>'))
         elif p.startswith('/runs/') and p[6:].isdigit():
             result = get_run(DB, int(p[6:]))
             if result is None:
@@ -256,7 +257,7 @@ class Handler:
 
     def do_POST(self):
         if not self.valid_host(): return
-        if self.path not in ('/run', '/intelligence/check', '/behavior/check', '/ai-behavior/check', '/experiments/check', '/live/check', '/memory/build', '/risk/analyze', '/continuous/assess', '/monitor/configure', '/changes/analyze', '/projects/create', '/investigations/start', '/verification/start', '/knowledge/refresh', '/knowledge/configure'):
+        if self.path not in ('/run', '/intelligence/check', '/behavior/check', '/ai-behavior/check', '/experiments/check', '/live/check', '/memory/build', '/risk/analyze', '/continuous/assess', '/monitor/configure', '/changes/analyze', '/projects/create', '/investigations/start', '/verification/start', '/knowledge/refresh', '/knowledge/configure', '/knowledge/retry', '/passport/save'):
             self.send_html(self.render_page('<p>Not found</p>'),404)
             return
         try:
@@ -270,12 +271,13 @@ class Handler:
             if not secrets.compare_digest(field('csrf'), TOKEN) or field('authorized') != 'yes':
                 raise ValueError('Authorization confirmation or CSRF token missing')
             action = self.path
-            if action in ('/knowledge/refresh','/knowledge/configure'):
-                source=field('source')
+            if action in ('/knowledge/refresh','/knowledge/configure','/knowledge/retry'):
+                source='cve' if action=='/knowledge/retry' else field('source')
                 if source not in knowledge.SOURCES: raise ValueError('Choose an intelligence source')
                 if action == '/knowledge/configure':
                     knowledge.configure(DB,source,field('enabled')=='yes',int(field('interval')))
                 else:
+                    if action=='/knowledge/retry': knowledge.retry_failed(DB)
                     JOBS.submit(('knowledge',source),knowledge.refresh,DB,source,True)
                 self.redirect('/intelligence',notice='saved' if action=='/knowledge/configure' else 'queued'); return
             if action == '/projects/create':
@@ -305,6 +307,10 @@ class Handler:
                 '/experiments/check':'/verification','/intelligence/check':'/intelligence'}
             destination = destinations.get(action,'/investigations')
             selected_project = Path(project).resolve().name if project else ''
+            if action == '/passport/save':
+                if not project: raise ValueError('Project is required')
+                identity.update_passport(DB,project,**{key:field(key) for key in ('owner','purpose','environment','data_classification','access_policy')})
+                self.redirect('/passport',selected_project,'saved'); return
             if action == '/monitor/configure':
                 if not project: raise ValueError('Project is required')
                 monitor.configure(DB, project, PROJECTS, enabled=field('enabled')=='yes',
@@ -323,14 +329,14 @@ class Handler:
             if action == '/risk/analyze':
                 if not project: raise ValueError('Project is required')
                 behavior_inventory(project,PROJECTS)
-                risk_analyze(DB,Path(project).resolve().name,use_ai=(field('use_ai')=='yes'))
+                risk_analyze(DB,Path(project).resolve().name,use_ai=(field('use_ai')=='yes'),project_root=project)
                 self.redirect(destination,selected_project,'queued' if action in ('/live/check','/experiments/check','/ai-behavior/check','/behavior/check','/intelligence/check') else 'completed')
                 return
             if action == '/memory/build':
                 if not project: raise ValueError('Project is required')
                 from .behavior import inventory
                 inventory(project,PROJECTS)
-                memory_snapshot(DB,Path(project).resolve().name)
+                memory_snapshot(DB,Path(project).resolve().name,project_root=project)
                 self.redirect(destination,selected_project,'queued' if action in ('/live/check','/experiments/check','/ai-behavior/check','/behavior/check','/intelligence/check') else 'completed')
                 return
             if action == '/live/check':
@@ -354,8 +360,8 @@ class Handler:
                 self.redirect(destination,selected_project,'queued' if action in ('/live/check','/experiments/check','/ai-behavior/check','/behavior/check','/intelligence/check') else 'completed')
                 return
             if action == '/intelligence/check':
-                from .intelligence import project_manifest
-                project_manifest(project, PROJECTS)
+                from .dependencies import inventory
+                inventory(project, PROJECTS)
                 JOBS.submit((action,project),check_project,DB,project,PROJECTS)
                 self.redirect(destination,selected_project,'queued' if action in ('/live/check','/experiments/check','/ai-behavior/check','/behavior/check','/intelligence/check') else 'completed')
                 return

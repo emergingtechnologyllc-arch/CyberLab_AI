@@ -2,18 +2,14 @@
 import json
 from pathlib import Path
 import sqlite3
+from . import identity
 
 SOURCES = (('ai_behavior_runs', 'ai_behavior_events', 'ai_event', 'hypothesis'),
            ('live_runs', 'live_events', 'live_event', 'live_observation'))
 
 
 def migrate(db, table):
-    # Called only with internal table constants, under a write transaction.
-    if table not in {s[0] for s in SOURCES}:
-        raise ValueError('Unknown provenance table')
-    if 'project_root' not in {r[1] for r in db.execute(f'PRAGMA table_info({table})')}:
-        db.execute(f"ALTER TABLE {table} ADD COLUMN project_root TEXT NOT NULL DEFAULT ''")
-    db.execute(f'CREATE INDEX IF NOT EXISTS {table}_root ON {table}(project_root,id)')
+    identity.migrate(db,table)
 
 
 def summaries(path, project_root, patterns, before=None):

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import re
 import sqlite3
+from . import identity
 
 MAX_FILES = 3000
 MAX_DIRECTORIES = 5000
@@ -21,6 +22,8 @@ def init_behavior(db_path):
         db.execute('''CREATE TABLE IF NOT EXISTS behavior_routes
             (check_id INTEGER, route TEXT, methods TEXT, dynamic INTEGER, sensitive INTEGER,
              hypothesis TEXT, evidence TEXT)''')
+        identity.migrate(db, 'behavior_checks')
+
 
 def route_for(rel):
     p = rel.as_posix()
@@ -84,9 +87,10 @@ def inventory(project, base):
 
 def check_project(db_path, project, base):
     init_behavior(db_path)
+    project_id=identity.register(db_path,project)
     with sqlite3.connect(db_path) as db:
-        rid = db.execute('INSERT INTO behavior_checks(created,project,status,route_count,summary,error) VALUES(?,?,?,?,?,?)',
-            (dt.datetime.now(dt.timezone.utc).isoformat(),Path(project).name,'running',0,'','')).lastrowid
+        rid = db.execute('INSERT INTO behavior_checks(created,project,status,route_count,summary,error,project_root,project_id) VALUES(?,?,?,?,?,?,?,?)',
+            (dt.datetime.now(dt.timezone.utc).isoformat(),Path(project).name,'running',0,'','',str(Path(project).resolve()),project_id)).lastrowid
     try:
         routes = inventory(project, base)
         with sqlite3.connect(db_path) as db:
